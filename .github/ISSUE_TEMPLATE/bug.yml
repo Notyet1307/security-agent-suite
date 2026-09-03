@@ -1,0 +1,40 @@
+name: Bug
+about: Report a reproducible defect without customer-sensitive data
+title: '[Bug] '
+labels: ['type:bug']
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, customer data, live exploit payloads, or unauthorized targets.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [Go API, sasctl, agent-compose adapter, Agent Pack, Skill, Contract, Deployment, Documentation]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Use synthetic or sanitized inputs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

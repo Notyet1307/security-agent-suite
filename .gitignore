@@ -1,0 +1,25 @@
+# build
+/bin/
+/dist/
+*.out
+*.test
+coverage.txt
+
+# runtime state
+/var/
+/artifacts/
+/state/
+*.log
+
+# local configuration
+.env
+.env.*
+!.env.example
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# agent-compose local runtime
+.agent-compose/

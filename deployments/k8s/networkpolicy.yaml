@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: security-agent-suite-default
+  namespace: security-agent-suite
+spec:
+  podSelector:
+    matchLabels:
+      app: security-agent-suite
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  # Add explicit egress to the agent-compose daemon only after its namespace
+  # and service identity are known. Do not allow 0.0.0.0/0 by default.

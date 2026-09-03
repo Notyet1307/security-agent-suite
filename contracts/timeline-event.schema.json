@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TimelineEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "time",
+    "event_type",
+    "subject",
+    "description",
+    "classification",
+    "evidence_refs",
+    "confidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "event_type": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "object": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "classification": {
+      "enum": [
+        "observed",
+        "inferred",
+        "reported"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

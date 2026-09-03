@@ -1,0 +1,53 @@
+ID	PHASE	TITLE	LABELS	DEPENDS_ON	ACCEPTANCE
+SAS-001	M0	发布公开仓库与首个 alpha 标签	phase:M0,type:release,priority:P0		main 受保护且 v0.1.0-alpha.1 可重复构建
+SAS-002	M0	启用 CI CodeQL Dependabot 与分支保护	phase:M0,type:infra,priority:P0	SAS-001	PR 必须通过 verify 和安全检查
+SAS-003	M0	建立许可证 NOTICE 与第三方引入流程	phase:M0,type:governance,priority:P0	SAS-001	新依赖有来源 许可证 commit 和 SBOM 记录
+SAS-101	M1	实现 sasctl doctor 环境核验	phase:M1,type:feature,priority:P0	SAS-001	输出 Docker agent-compose OctoBus Provider 镜像与网络检查
+SAS-102	M1	固定 agent-compose 与 Guest 镜像版本	phase:M1,type:infra,priority:P0	SAS-101	版本和 digest 写入 release manifest
+SAS-103	M1	完成五个 Agent 的真实 Sandbox smoke	phase:M1,type:test,priority:P0	SAS-102	每个 Agent 20 次运行达到门槛
+SAS-104	M1	实现 Agent 输出 JSON Schema 强校验	phase:M1,type:feature,priority:P0	SAS-103	非法输出不能 succeeded 且原始输出保留
+SAS-105	M1	记录 daemon run sandbox model skill tool provenance	phase:M1,type:feature,priority:P1	SAS-103	Run 可复现执行版本
+SAS-106	M1	将取消传播到 agent-compose 实际运行	phase:M1,type:feature,priority:P0	SAS-103	取消后 Sandbox 停止且状态一致
+SAS-107	M1	建立执行错误分类与安全重试策略	phase:M1,type:reliability,priority:P1	SAS-103	瞬时错误可重试 有副作用错误不自动重试
+SAS-201	M2	实现 Artifact 上传登记与下载授权	phase:M2,type:feature,priority:P0	SAS-104	支持大文件引用 哈希 媒体类型与租户隔离
+SAS-202	M2	实现 append-only Evidence Store	phase:M2,type:feature,priority:P0	SAS-201	Evidence 保存来源 工具 参数 版本 时间和哈希
+SAS-203	M2	实现 Finding Timeline AttackPath 引用校验	phase:M2,type:feature,priority:P0	SAS-202	高风险 Finding 无证据时拒绝
+SAS-204	M2	开发 security-evidence OctoBus 服务	phase:M2,type:integration,priority:P0	SAS-202	Sandbox 可受控写证据且不能覆盖历史
+SAS-205	M2	定义并评审全部 capset 与方法级权限	phase:M2,type:security,priority:P0	SAS-204	无超级 capset 且每个方法有风险和审计字段
+SAS-206	M2	建立 Fixture Manifest 与证据质量指标	phase:M2,type:test,priority:P1	SAS-203	数据来源期望结论和版本可追踪
+SAS-301	M3	建立报告指标字典与确定性统计服务	phase:M3,type:feature,priority:P0	SAS-202	所有数字可复算且有 metric_id
+SAS-302	M3	实现 CSV JSON Run Result 输入映射	phase:M3,type:feature,priority:P0	SAS-301	缺失和错误字段有明确诊断
+SAS-303	M3	实现模板注册表与 DOCX PDF 渲染	phase:M3,type:feature,priority:P0	SAS-302	四类报告可生成可编辑 Word 和 PDF
+SAS-304	M3	实现数字 引用 排版 敏感信息质量门	phase:M3,type:test,priority:P0	SAS-303	校验失败阻止发布并保留结构化结果
+SAS-305	M3	建立报告 Golden Fixture 回归集	phase:M3,type:test,priority:P1	SAS-304	至少 10 个固定案例持续通过
+SAS-401	M4	建立合规语料元数据和版本模型	phase:M4,type:feature,priority:P0	SAS-202	文档版本 生效 废止 机构 条款可查询
+SAS-402	M4	实现权威原文摄取检索和引用定位	phase:M4,type:feature,priority:P0	SAS-401	每个回答引用真实条款位置
+SAS-403	M4	实现适用性判断与 Control 映射	phase:M4,type:feature,priority:P0	SAS-402	行业主体系统时间等变量参与判断
+SAS-404	M4	实现客户证据差距分析和规则引擎	phase:M4,type:feature,priority:P1	SAS-403	无客户证据时只输出 not_assessed
+SAS-405	M4	建立合规专家评测集	phase:M4,type:test,priority:P0	SAS-404	100 问答和 30 差距案例达到门槛
+SAS-501	M5	定义统一告警事件资产账号进程连接模型	phase:M5,type:feature,priority:P0	SAS-203	首批数据源可无损映射
+SAS-502	M5	接入告警 资产 终端和情报只读能力	phase:M5,type:integration,priority:P0	SAS-501	四类数据源查询可审计
+SAS-503	M5	实现去重聚合实体关联和历史上下文	phase:M5,type:feature,priority:P0	SAS-502	重复告警保留次数和时间边界
+SAS-504	M5	实现支持证据反证和替代假设流程	phase:M5,type:feature,priority:P0	SAS-503	每个判断显示证据和缺口
+SAS-505	M5	建立严重性模型与只读处置建议	phase:M5,type:feature,priority:P1	SAS-504	无自动封禁隔离删除或关闭
+SAS-506	M5	建立五类事件与提示注入评测	phase:M5,type:test,priority:P0	SAS-505	达到客户真阳性误报和安全门槛
+SAS-601	M6	实现 PCAP 大文件检查与离线解析能力	phase:M6,type:feature,priority:P0	SAS-201	格式 哈希 截断 时间范围和大小均可验证
+SAS-602	M6	封装 Zeek Suricata tshark 只读 OctoBus 服务	phase:M6,type:integration,priority:P0	SAS-601	工具版本参数输出写入 Evidence
+SAS-603	M6	实现协议日志规范化和会话归并	phase:M6,type:feature,priority:P0	SAS-602	连接 DNS HTTP TLS 文件和告警统一
+SAS-604	M6	实现时间线实体图和 ATT&CK 映射	phase:M6,type:feature,priority:P0	SAS-603	每个事件有证据且推断明确标记
+SAS-605	M6	建立流量正确性和性能评测集	phase:M6,type:test,priority:P0	SAS-604	正常恶意加密截断和 1GB 样本通过
+SAS-701	M7	实现授权范围时间方法和停止条件模型	phase:M7,type:security,priority:P0	SAS-205	主动请求缺一项即拒绝
+SAS-702	M7	实现不可变审批记录与职责分离	phase:M7,type:security,priority:P0	SAS-701	提交人和审批人策略可配置
+SAS-703	M7	实现目标身份 CIDR 域名与 DNS 漂移校验	phase:M7,type:security,priority:P0	SAS-702	范围外目标请求为零
+SAS-704	M7	建立安全验证模板注册表	phase:M7,type:feature,priority:P0	SAS-703	禁止任意 Shell 或未评审 PoC
+SAS-705	M7	开发 attack-validation-gated 双重策略服务	phase:M7,type:integration,priority:P0	SAS-704	Go 与工具侧都验证授权审批和停止条件
+SAS-706	M7	实现验证证据和攻击路径图	phase:M7,type:feature,priority:P0	SAS-705	verified 结论可人工复现
+SAS-707	M7	执行越权 SSRF DNS rebinding 与 Sandbox 专项测试	phase:M7,type:security,priority:P0	SAS-706	所有 P0 安全用例通过
+SAS-801	M8	实现显式跨 Agent Workflow 与审批暂停	phase:M8,type:feature,priority:P1	SAS-305,SAS-405,SAS-506,SAS-605,SAS-707	工作流可取消恢复且不隐式放行高风险任务
+SAS-802	M8	实现跨 Run lineage 版本和证据去重	phase:M8,type:feature,priority:P0	SAS-801	报告可追溯到最初数据源
+SAS-803	M8	建立全套离线评测与升级回归门	phase:M8,type:test,priority:P0	SAS-802	模型 Skill 工具升级均需通过
+SAS-901	M9	迁移 PostgreSQL 事务存储和任务租约	phase:M9,type:reliability,priority:P0	SAS-803	单节点故障不丢已接受任务
+SAS-902	M9	迁移 S3 MinIO Artifact 与 KMS	phase:M9,type:reliability,priority:P0	SAS-901	加密 生命周期 签名下载和删除可验证
+SAS-903	M9	实现 OIDC mTLS RBAC 与审批角色分离	phase:M9,type:security,priority:P0	SAS-901	所有敏感操作有身份和权限
+SAS-904	M9	接入 OTEL SLO 告警容量和成本指标	phase:M9,type:observability,priority:P1	SAS-901	关键失败和延迟可告警
+SAS-905	M9	建立离线交付 SBOM 签名扫描与升级回滚	phase:M9,type:release,priority:P0	SAS-902,SAS-903,SAS-904	客户环境可重复安装升级和恢复

@@ -1,0 +1,34 @@
+{
+  "request_id": "demo-report-001",
+  "case_id": "CASE-DEMO-005",
+  "mode": "weekly",
+  "inputs": [
+    {
+      "type": "finding-set",
+      "uri": "artifact://uploads/findings-week-36.json",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "media_type": "application/json"
+    }
+  ],
+  "scope": {
+    "tenant_id": "default",
+    "time_range": {
+      "start": "2026-08-24T00:00:00Z",
+      "end": "2026-08-31T00:00:00Z"
+    }
+  },
+  "policy": {
+    "network_access": "deny"
+  },
+  "output": {
+    "language": "zh-CN",
+    "formats": [
+      "json",
+      "docx"
+    ]
+  },
+  "metadata": {
+    "template_id": "security-operations-weekly-v1",
+    "timezone": "Asia/Shanghai"
+  }
+}

@@ -1,0 +1,6 @@
+security-agent-suite
+Copyright 2026 Yet / Notyet1307
+
+This repository is an original reference implementation. It studies public design patterns from agent-compose, OctoBus, CyberStrikeAI, reverse-skill, Anthropic-Cybersecurity-Skills, open-kritt and other public projects, but does not vendor their source code.
+
+Each referenced or optionally integrated project remains subject to its own license. See docs/research/reference-projects.md before copying code or distributing combined software.

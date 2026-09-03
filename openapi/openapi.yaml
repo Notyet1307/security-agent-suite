@@ -1,0 +1,496 @@
+openapi: 3.1.0
+info:
+  title: Security Agent Suite API
+  version: 0.1.0
+  description: >-
+    Go control-plane API for five independently callable cybersecurity agents.
+    All /v1 endpoints require X-Tenant-ID and, when configured, X-API-Key.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: System
+  - name: Agents
+  - name: Runs
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      security: []
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+  /readyz:
+    get:
+      tags: [System]
+      security: []
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+  /version:
+    get:
+      tags: [System]
+      summary: Build information
+      responses:
+        "200":
+          description: Version information
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, commit]
+                properties:
+                  version: { type: string }
+                  commit: { type: string }
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema: { type: string }
+  /v1/agents:
+    get:
+      tags: [Agents]
+      summary: List callable agents
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+      responses:
+        "200":
+          description: Agent catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/agents/{agentID}:
+    get:
+      tags: [Agents]
+      summary: Get one agent
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: Agent definition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/agents/{agentID}/runs:
+    post:
+      tags: [Runs]
+      summary: Create an agent run
+      description: >-
+        request_id is idempotent within a tenant. Active attack-path validation
+        is created in waiting_approval and is not queued until approved.
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRunRequest" }
+      responses:
+        "202":
+          description: Run created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "200":
+          description: Existing idempotent run returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs:
+    get:
+      tags: [Runs]
+      summary: List tenant runs
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - name: agent_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/RunStatus" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs, count]
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+                  count: { type: integer }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}:
+    get:
+      tags: [Runs]
+      summary: Get a run
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/events:
+    get:
+      tags: [Runs]
+      summary: Get run audit events
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, events]
+                properties:
+                  run_id: { type: string }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunEvent" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/artifacts:
+    get:
+      tags: [Runs]
+      summary: List run artifacts
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Artifact metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, artifacts]
+                properties:
+                  run_id: { type: string }
+                  artifacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Artifact" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/artifacts/{artifactID}:
+    get:
+      tags: [Runs]
+      summary: Download one run artifact
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+        - name: artifactID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Artifact bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/approve:
+    post:
+      tags: [Runs]
+      summary: Approve a waiting run
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalRequest" }
+      responses:
+        "202":
+          description: Approved and queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/cancel:
+    post:
+      tags: [Runs]
+      summary: Cancel a queued or running run
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                actor: { type: string }
+                reason: { type: string }
+      responses:
+        "200":
+          description: Cancelled run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    TenantID:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    AgentID:
+      name: agentID
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [traffic-analysis, event-triage, attack-path-validation, compliance-query, security-report]
+    RunID:
+      name: runID
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Structured error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+    Agent:
+      type: object
+      required: [id, display_name, description, risk, executor_agent, allowed_modes, input_types, output_formats, capset_ids, default_timeout]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        risk: { enum: [low, medium, high] }
+        executor_agent: { type: string }
+        allowed_modes: { type: array, items: { type: string } }
+        input_types: { type: array, items: { type: string } }
+        output_formats: { type: array, items: { type: string } }
+        capset_ids: { type: array, items: { type: string } }
+        approval_required_modes: { type: array, items: { type: string } }
+        default_timeout: { type: string }
+    RunStatus:
+      type: string
+      enum: [queued, validating, waiting_approval, running, succeeded, partial, failed, cancelled]
+    InputRef:
+      type: object
+      additionalProperties: false
+      required: [type, uri]
+      properties:
+        type: { type: string }
+        uri: { type: string, format: uri }
+        sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        media_type: { type: string }
+        size_bytes: { type: integer, minimum: 0 }
+        metadata: { type: object, additionalProperties: { type: string } }
+    Scope:
+      type: object
+      additionalProperties: false
+      required: [tenant_id]
+      properties:
+        tenant_id: { type: string }
+        authorization_ref: { type: string }
+        assets: { type: array, items: { type: string } }
+        networks: { type: array, items: { type: string } }
+        domains: { type: array, items: { type: string } }
+        time_range:
+          type: object
+          required: [start, end]
+          properties:
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+    Policy:
+      type: object
+      additionalProperties: false
+      properties:
+        network_access: { enum: [deny, restricted, allow] }
+        active_validation: { type: boolean }
+        approval_id: { type: string }
+        max_requests: { type: integer, minimum: 0, maximum: 1000 }
+        max_duration: { type: string }
+    OutputRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        language: { type: string }
+        formats:
+          type: array
+          items: { enum: [json, html, docx, pdf] }
+    CreateRunRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, mode, scope]
+      properties:
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+        case_id: { type: string }
+        mode: { type: string }
+        inputs: { type: array, maxItems: 64, items: { $ref: "#/components/schemas/InputRef" } }
+        scope: { $ref: "#/components/schemas/Scope" }
+        policy: { $ref: "#/components/schemas/Policy" }
+        output: { $ref: "#/components/schemas/OutputRequest" }
+        metadata: { type: object, additionalProperties: { type: string } }
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [approval_id, actor, reason]
+      properties:
+        approval_id: { type: string, minLength: 1 }
+        actor: { type: string, minLength: 1 }
+        reason: { type: string, minLength: 1 }
+    Approval:
+      allOf:
+        - $ref: "#/components/schemas/ApprovalRequest"
+        - type: object
+          required: [created_at]
+          properties:
+            created_at: { type: string, format: date-time }
+    Artifact:
+      type: object
+      required: [id, name, uri, media_type, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        uri: { type: string }
+        media_type: { type: string }
+        sha256: { type: string }
+        size_bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+    Evidence:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        source_uri: { type: string }
+        sha256: { type: string }
+        excerpt: { type: string }
+        tool: { type: string }
+        collected_at: { type: string, format: date-time }
+        metadata: { type: object, additionalProperties: { type: string } }
+    Finding:
+      type: object
+      required: [id, type, title, severity, confidence, status, evidence_refs]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        title: { type: string }
+        severity: { enum: [critical, high, medium, low, informational] }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        status: { type: string }
+        evidence_refs: { type: array, items: { type: string } }
+        asset_refs: { type: array, items: { type: string } }
+        attack_techniques: { type: array, items: { type: string } }
+        description: { type: string }
+    RunResult:
+      type: object
+      required: [executor, summary]
+      properties:
+        executor: { type: string }
+        summary: { type: string }
+        evidence: { type: array, items: { $ref: "#/components/schemas/Evidence" } }
+        findings: { type: array, items: { $ref: "#/components/schemas/Finding" } }
+        artifacts: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+        limitations: { type: array, items: { type: string } }
+        raw_output: {}
+        error_code: { type: string }
+        error_message: { type: string }
+    RunEvent:
+      type: object
+      required: [sequence, type, message, at]
+      properties:
+        sequence: { type: integer }
+        type: { type: string }
+        from: { $ref: "#/components/schemas/RunStatus" }
+        to: { $ref: "#/components/schemas/RunStatus" }
+        message: { type: string }
+        actor: { type: string }
+        at: { type: string, format: date-time }
+        details: { type: object, additionalProperties: { type: string } }
+    Run:
+      type: object
+      required: [id, request_id, agent_id, agent_name, mode, scope, status, created_at, updated_at, version]
+      properties:
+        id: { type: string }
+        request_id: { type: string }
+        case_id: { type: string }
+        agent_id: { type: string }
+        agent_name: { type: string }
+        mode: { type: string }
+        inputs: { type: array, items: { $ref: "#/components/schemas/InputRef" } }
+        scope: { $ref: "#/components/schemas/Scope" }
+        policy: { $ref: "#/components/schemas/Policy" }
+        output: { $ref: "#/components/schemas/OutputRequest" }
+        metadata: { type: object, additionalProperties: { type: string } }
+        status: { $ref: "#/components/schemas/RunStatus" }
+        approval: { $ref: "#/components/schemas/Approval" }
+        result: { $ref: "#/components/schemas/RunResult" }
+        events: { type: array, items: { $ref: "#/components/schemas/RunEvent" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        version: { type: integer }

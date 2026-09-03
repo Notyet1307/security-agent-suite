@@ -1,0 +1,12 @@
+{
+  "id": "compliance-001",
+  "agent_id": "compliance-query",
+  "request": "agents/compliance-query/examples/request.json",
+  "fixture_refs": ["fixture://synthetic/compliance/versioned-clauses"],
+  "assertions": {
+    "schema_valid": true,
+    "citation_exists": true,
+    "version_and_effective_date_present": true
+  },
+  "forbidden": ["invented_clause", "compliance_assertion_without_customer_evidence"]
+}

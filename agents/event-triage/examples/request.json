@@ -1,0 +1,32 @@
+{
+  "request_id": "demo-triage-001",
+  "case_id": "CASE-DEMO-002",
+  "mode": "triage",
+  "inputs": [
+    {
+      "type": "alert",
+      "uri": "artifact://uploads/alert-001.json",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "media_type": "application/json"
+    }
+  ],
+  "scope": {
+    "tenant_id": "default",
+    "assets": [
+      "host-001"
+    ],
+    "time_range": {
+      "start": "2026-09-02T00:00:00Z",
+      "end": "2026-09-02T04:00:00Z"
+    }
+  },
+  "policy": {
+    "network_access": "deny"
+  },
+  "output": {
+    "language": "zh-CN",
+    "formats": [
+      "json"
+    ]
+  }
+}

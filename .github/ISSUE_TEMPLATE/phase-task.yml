@@ -1,0 +1,41 @@
+name: Phase task
+about: Implement one roadmap unit with explicit evidence and acceptance criteria
+title: '[SAS-xxx] '
+labels: ['type:feature']
+body:
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options: [M0, M1, M2, M3, M4, M5, M6, M7, M8, M9]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and load-bearing gap
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope / out of scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |-
+        - [ ] Normal path
+        - [ ] Failure/timeout/cancel path
+        - [ ] Security boundary
+        - [ ] Documentation and rollback
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Required verification evidence
+    validations:
+      required: true

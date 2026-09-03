@@ -1,0 +1,76 @@
+package app
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/Notyet1307/security-agent-suite/internal/artifacts"
+	"github.com/Notyet1307/security-agent-suite/internal/catalog"
+	"github.com/Notyet1307/security-agent-suite/internal/domain"
+	mockexecutor "github.com/Notyet1307/security-agent-suite/internal/executor/mock"
+	"github.com/Notyet1307/security-agent-suite/internal/observability"
+	"github.com/Notyet1307/security-agent-suite/internal/policy"
+	"github.com/Notyet1307/security-agent-suite/internal/prompt"
+	memorystore "github.com/Notyet1307/security-agent-suite/internal/store/memory"
+)
+
+func TestServiceCompletesMockRun(t *testing.T) {
+	catalog, err := catalog.Load("../../configs/agents.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactStore, err := artifacts.New(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, memorystore.New(), catalog, policy.New(), mockexecutor.New(artifactStore), prompt.New(), observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	run, created, err := service.CreateRun(context.Background(), "event-triage", domain.CreateRunRequest{RequestID: "req-service-1", Mode: "triage", Inputs: []domain.InputRef{{Type: "alert", URI: "artifact://alerts/1"}}, Scope: domain.Scope{TenantID: "t1"}})
+	if err != nil || !created {
+		t.Fatalf("create run: created=%v err=%v", created, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded, getErr := service.GetRun(context.Background(), "t1", run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if loaded.Status.Terminal() {
+			if loaded.Status != domain.RunStatusSucceeded || loaded.Result == nil || len(loaded.Result.Artifacts) != 1 {
+				t.Fatalf("unexpected result: %+v", loaded)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("run did not complete")
+}
+
+func TestServiceApprovalGate(t *testing.T) {
+	catalog, _ := catalog.Load("../../configs/agents.json")
+	artifactStore, _ := artifacts.New(t.TempDir())
+	service := New(Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, memorystore.New(), catalog, policy.New(), mockexecutor.New(artifactStore), prompt.New(), observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_ = service.Start()
+	defer service.Close()
+
+	req := domain.CreateRunRequest{RequestID: "req-attack", Mode: "active_validate", Inputs: []domain.InputRef{{Type: "scanner-result", URI: "artifact://scanner/1"}}, Scope: domain.Scope{TenantID: "t1", AuthorizationRef: "AUTH-1", Assets: []string{"https://target.example"}}, Policy: domain.PolicyRequest{ActiveValidation: true, NetworkAccess: "restricted", MaxRequests: 10}}
+	run, _, err := service.CreateRun(context.Background(), "attack-path-validation", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != domain.RunStatusWaitingApproval {
+		t.Fatalf("expected waiting approval, got %s", run.Status)
+	}
+	approved, err := service.ApproveRun(context.Background(), "t1", run.ID, domain.ApprovalRequest{ApprovalID: "APP-1", Actor: "reviewer", Reason: "authorized test"})
+	if err != nil || approved.Status != domain.RunStatusQueued {
+		t.Fatalf("approve: run=%+v err=%v", approved, err)
+	}
+}

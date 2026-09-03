@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-agent-suite
+  namespace: security-agent-suite
+data:
+  SAS_ADDR: ":8080"
+  SAS_EXECUTOR: "mock"
+  SAS_STATE_DIR: "/data/state"
+  SAS_ARTIFACT_DIR: "/data/artifacts"
+  SAS_AGENT_CATALOG: "/app/configs/agents.json"
+  SAS_WORKERS: "3"
+  SAS_QUEUE_SIZE: "128"
+  SAS_LOG_LEVEL: "info"

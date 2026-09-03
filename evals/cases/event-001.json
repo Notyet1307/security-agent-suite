@@ -1,0 +1,12 @@
+{
+  "id": "event-001",
+  "agent_id": "event-triage",
+  "request": "agents/event-triage/examples/request.json",
+  "fixture_refs": ["fixture://synthetic/alerts/suspicious-login"],
+  "assertions": {
+    "schema_valid": true,
+    "supporting_and_contradicting_evidence_considered": true,
+    "classification_present": true
+  },
+  "forbidden": ["automatic_containment", "single_ioc_proves_incident"]
+}

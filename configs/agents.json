@@ -1,0 +1,69 @@
+{
+  "agents": [
+    {
+      "id": "traffic-analysis",
+      "display_name": "网络流量包分析智能体",
+      "description": "关联PCAP、DNS、代理、邮件、终端、进程和登录等多源证据，重建事件时间线、传播路径与影响范围。",
+      "risk": "medium",
+      "executor_agent": "traffic-analysis",
+      "allowed_modes": ["analyze", "investigate"],
+      "input_types": ["pcap", "zeek", "suricata-eve", "dns-log", "proxy-log", "endpoint-log", "login-log", "csv", "json"],
+      "output_formats": ["json", "html"],
+      "capset_ids": ["traffic-readonly", "security-evidence", "threat-intel-readonly", "asset-readonly"],
+      "approval_required_modes": [],
+      "default_timeout": "30m"
+    },
+    {
+      "id": "event-triage",
+      "display_name": "事件研判智能体",
+      "description": "对告警进行聚合、情报丰富化、假设验证、事件定性定级，并给出处置优先级与复盘方向。",
+      "risk": "medium",
+      "executor_agent": "event-triage",
+      "allowed_modes": ["triage", "investigate"],
+      "input_types": ["alert", "event", "siem-export", "edr-export", "csv", "json"],
+      "output_formats": ["json", "html"],
+      "capset_ids": ["alert-readonly", "asset-readonly", "endpoint-readonly", "security-evidence", "threat-intel-readonly"],
+      "approval_required_modes": [],
+      "default_timeout": "20m"
+    },
+    {
+      "id": "attack-path-validation",
+      "display_name": "攻击路径验证智能体",
+      "description": "在明确授权和审批范围内，复核互联网暴露面、组件漏洞和候选攻击路径，区分理论风险与实际可利用风险。",
+      "risk": "high",
+      "executor_agent": "attack-path-validation",
+      "allowed_modes": ["assess", "passive_validate", "active_validate"],
+      "input_types": ["asset-list", "scanner-result", "vulnerability", "exposure-snapshot", "csv", "json"],
+      "output_formats": ["json", "html", "docx"],
+      "capset_ids": ["asset-readonly", "exposure-readonly", "vulnerability-readonly", "security-evidence", "attack-validation-gated"],
+      "approval_required_modes": ["active_validate"],
+      "default_timeout": "45m"
+    },
+    {
+      "id": "compliance-query",
+      "display_name": "网络安全合规查询智能体",
+      "description": "检索法规、标准与政策，解释条款适用性，并在客户证据充分时开展控制项差距分析。",
+      "risk": "low",
+      "executor_agent": "compliance-query",
+      "allowed_modes": ["query", "gap_assessment"],
+      "input_types": ["question", "control-evidence", "policy-document", "csv", "json"],
+      "output_formats": ["json", "html", "docx"],
+      "capset_ids": ["compliance-readonly", "customer-evidence-readonly", "security-evidence"],
+      "approval_required_modes": [],
+      "default_timeout": "15m"
+    },
+    {
+      "id": "security-report",
+      "display_name": "网络安全报告智能体",
+      "description": "将结构化安全数据、日志或CSV整理为日报、周报、月报和事件、流量、合规专项报告。",
+      "risk": "low",
+      "executor_agent": "security-report",
+      "allowed_modes": ["daily", "weekly", "monthly", "incident", "traffic", "compliance"],
+      "input_types": ["run-result", "finding-set", "evidence-set", "security-log", "csv", "json"],
+      "output_formats": ["json", "html", "docx", "pdf"],
+      "capset_ids": ["evidence-readonly", "report-render", "template-readonly"],
+      "approval_required_modes": [],
+      "default_timeout": "20m"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "defaults": {
+    "network_access": "deny",
+    "max_duration": "30m",
+    "max_requests": 0,
+    "require_evidence_for_severity": ["high", "critical"]
+  },
+  "agents": {
+    "attack-path-validation": {
+      "modes_requiring_approval": ["active_validate"],
+      "allowed_network_access": ["deny", "restricted"],
+      "max_requests": 200,
+      "max_duration": "30m",
+      "forbidden_actions": [
+        "persistence",
+        "lateral_movement",
+        "credential_export",
+        "bulk_data_read",
+        "destructive_change",
+        "command_and_control"
+      ]
+    }
+  }
+}

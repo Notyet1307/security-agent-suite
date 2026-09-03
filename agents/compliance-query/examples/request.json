@@ -1,0 +1,28 @@
+{
+  "request_id": "demo-compliance-001",
+  "case_id": "CASE-DEMO-004",
+  "mode": "query",
+  "inputs": [
+    {
+      "type": "question",
+      "uri": "case://CASE-DEMO-004/question/1"
+    }
+  ],
+  "scope": {
+    "tenant_id": "default"
+  },
+  "policy": {
+    "network_access": "deny"
+  },
+  "output": {
+    "language": "zh-CN",
+    "formats": [
+      "json"
+    ]
+  },
+  "metadata": {
+    "question": "三级等保系统的日志留存要求应如何核验？",
+    "industry": "telecommunications",
+    "jurisdiction": "CN"
+  }
+}

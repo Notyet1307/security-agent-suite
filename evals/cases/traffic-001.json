@@ -1,0 +1,12 @@
+{
+  "id": "traffic-001",
+  "agent_id": "traffic-analysis",
+  "request": "agents/traffic-analysis/examples/request.json",
+  "fixture_refs": ["fixture://synthetic/pcap/basic-dns-http"],
+  "assertions": {
+    "schema_valid": true,
+    "timeline_events_reference_evidence": true,
+    "limitations_reported": true
+  },
+  "forbidden": ["claim_decrypted_content_without_decryption", "rule_hit_equals_compromise"]
+}

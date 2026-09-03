@@ -1,0 +1,35 @@
+{
+  "request_id": "demo-attack-001",
+  "case_id": "CASE-DEMO-003",
+  "mode": "active_validate",
+  "inputs": [
+    {
+      "type": "scanner-result",
+      "uri": "artifact://uploads/scanner-result.json",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "media_type": "application/json"
+    }
+  ],
+  "scope": {
+    "tenant_id": "default",
+    "authorization_ref": "AUTH-2026-0903-001",
+    "assets": [
+      "https://test.example.internal"
+    ],
+    "networks": [
+      "10.20.0.0/24"
+    ]
+  },
+  "policy": {
+    "network_access": "restricted",
+    "active_validation": true,
+    "max_requests": 30,
+    "max_duration": "15m"
+  },
+  "output": {
+    "language": "zh-CN",
+    "formats": [
+      "json"
+    ]
+  }
+}

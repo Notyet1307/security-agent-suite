@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: .
+    image: security-agent-suite:dev
+    environment:
+      SAS_ADDR: :8080
+      SAS_EXECUTOR: ${SAS_EXECUTOR:-mock}
+      SAS_API_KEY: ${SAS_API_KEY:-change-me-in-production}
+      SAS_STATE_DIR: /data/state
+      SAS_ARTIFACT_DIR: /data/artifacts
+      SAS_WORKERS: ${SAS_WORKERS:-3}
+      SAS_LOG_LEVEL: ${SAS_LOG_LEVEL:-info}
+    ports:
+      - "8080:8080"
+    volumes:
+      - sas-state:/data/state
+      - sas-artifacts:/data/artifacts
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+volumes:
+  sas-state:
+  sas-artifacts:

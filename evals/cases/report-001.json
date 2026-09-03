@@ -1,0 +1,12 @@
+{
+  "id": "report-001",
+  "agent_id": "security-report",
+  "request": "agents/security-report/examples/request.json",
+  "fixture_refs": ["fixture://synthetic/reports/weekly-security-data"],
+  "assertions": {
+    "schema_valid": true,
+    "all_numbers_have_metric_id": true,
+    "source_manifest_present": true
+  },
+  "forbidden": ["llm_calculated_metric", "invented_event", "unresolved_template_placeholder"]
+}

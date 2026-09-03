@@ -1,0 +1,113 @@
+version: 1
+status: target-contract
+notes:
+  - This file describes the intended capability surface; it is not an OctoBus import bundle yet.
+  - Every production method must add a concrete request/response schema, timeout and audit mapping.
+
+capsets:
+  security-evidence:
+    risk: controlled-write
+    methods:
+      - name: evidence.append
+        purpose: Append immutable evidence metadata and artifact references.
+      - name: evidence.list
+        purpose: List evidence within the caller tenant and run scope.
+      - name: evidence.get
+        purpose: Read one evidence item by id.
+  evidence-readonly:
+    risk: read-only
+    methods:
+      - name: evidence.get
+      - name: evidence.list
+      - name: finding.get
+      - name: finding.list
+      - name: timeline.list
+      - name: attack_path.get
+  traffic-readonly:
+    risk: sandboxed-analysis
+    methods:
+      - name: traffic.inspect_file
+      - name: traffic.run_zeek
+      - name: traffic.run_suricata
+      - name: traffic.tshark_query
+      - name: traffic.search_sessions
+      - name: traffic.extract_metadata
+  alert-readonly:
+    risk: read-only
+    methods:
+      - name: alert.get
+      - name: alert.search_related
+      - name: alert.get_raw_events
+  asset-readonly:
+    risk: read-only
+    methods:
+      - name: asset.get
+      - name: asset.search
+      - name: asset.get_business_context
+      - name: asset.get_exposure
+  endpoint-readonly:
+    risk: read-only
+    methods:
+      - name: endpoint.get_process_tree
+      - name: endpoint.get_logons
+      - name: endpoint.get_network_activity
+      - name: endpoint.get_file_activity
+  threat-intel-readonly:
+    risk: controlled-egress
+    methods:
+      - name: threat_intel.enrich_ioc
+      - name: threat_intel.search
+      - name: threat_intel.get_campaign_context
+  exposure-readonly:
+    risk: read-only
+    methods:
+      - name: exposure.get_asset
+      - name: exposure.search_services
+      - name: exposure.get_fingerprint_history
+  vulnerability-readonly:
+    risk: read-only
+    methods:
+      - name: vulnerability.get
+      - name: vulnerability.search_cve
+      - name: vulnerability.get_vendor_advisory
+      - name: vulnerability.get_scan_evidence
+  attack-validation-gated:
+    risk: high
+    requires:
+      - authorization_ref
+      - approval_id
+      - explicit_scope
+      - restricted_network
+      - stop_conditions
+    methods:
+      - name: validation.confirm_fingerprint
+      - name: validation.safe_http_probe
+      - name: validation.run_approved_template
+      - name: validation.capture_evidence
+  compliance-readonly:
+    risk: read-only
+    methods:
+      - name: compliance.search_documents
+      - name: compliance.get_clause
+      - name: compliance.compare_versions
+      - name: compliance.get_control
+      - name: compliance.validate_citation
+  customer-evidence-readonly:
+    risk: sensitive-read-only
+    methods:
+      - name: customer_evidence.search
+      - name: customer_evidence.get
+      - name: customer_evidence.list_by_control
+  report-render:
+    risk: controlled-write
+    methods:
+      - name: report.compute_metrics
+      - name: report.render_docx
+      - name: report.render_pdf
+      - name: report.validate_output
+  template-readonly:
+    risk: read-only
+    methods:
+      - name: template.list
+      - name: template.get
+      - name: template.get_schema

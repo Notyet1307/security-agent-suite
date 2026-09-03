@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-agent-suite
+  namespace: security-agent-suite
+spec:
+  # The current file store is single-writer only. Keep replicas at 1 until the
+  # PostgreSQL and object-store adapters are implemented.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: security-agent-suite
+  template:
+    metadata:
+      labels:
+        app: security-agent-suite
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/notyet1307/security-agent-suite:replace-with-release
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: security-agent-suite
+            - secretRef:
+                name: security-agent-suite
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: security-agent-suite-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
