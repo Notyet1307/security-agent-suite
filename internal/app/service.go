@@ -17,6 +17,7 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/policy"
 	"github.com/Notyet1307/security-agent-suite/internal/prompt"
 	"github.com/Notyet1307/security-agent-suite/internal/store"
+	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
 
 type Config struct {
@@ -328,6 +329,9 @@ func (s *Service) process(runID string) error {
 	result, execErr := s.executor.Execute(execCtx, domain.ExecutionRequest{Run: *run, Agent: agent, Prompt: promptText, Timeout: timeout})
 	cancel()
 	s.unregisterCancel(runID)
+	if execErr == nil {
+		result = validation.Gate(agent.ID, result, s.executor.Name())
+	}
 
 	finish := time.Now()
 	completedByWorker := false
@@ -344,7 +348,14 @@ func (s *Service) process(runID string) error {
 			if errors.Is(execErr, context.Canceled) {
 				code = "executor_cancelled"
 			}
-			current.SetResult(domain.RunResult{Executor: s.executor.Name(), Summary: "执行器未完成运行。", ErrorCode: code, ErrorMessage: message}, finish)
+			failureResult := result.Result
+			failureResult.Executor = s.executor.Name()
+			failureResult.ErrorCode = code
+			failureResult.ErrorMessage = message
+			if failureResult.Summary == "" {
+				failureResult.Summary = "执行器未完成运行。"
+			}
+			current.SetResult(failureResult, finish)
 			if err := current.Transition(domain.RunStatusFailed, message, s.executor.Name(), finish); err != nil {
 				return err
 			}

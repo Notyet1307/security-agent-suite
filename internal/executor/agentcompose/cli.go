@@ -14,7 +14,11 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/domain"
 )
 
-const maxCapturedOutput = 8 << 20
+const (
+	maxCapturedOutput     = 8 << 20
+	outputTruncatedCode   = "agent_compose_output_truncated"
+	outputTruncatedMarker = "[agent-compose output truncated]"
+)
 
 type Config struct {
 	Binary        string
@@ -78,7 +82,8 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		artifactsOut = append(artifactsOut, artifact)
 	}
 
-	raw := normalizeRaw(stdout.Bytes(), stderr.Bytes(), args, started, finished)
+	truncated := stdout.truncated || stderr.truncated
+	raw := normalizeRawCapture(stdout.Bytes(), stderr.Bytes(), args, started, finished, stdout.truncated, stderr.truncated)
 	result := domain.RunResult{
 		Executor:  e.Name(),
 		Summary:   extractSummary(stdout.Bytes()),
@@ -88,12 +93,18 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	if result.Summary == "" {
 		result.Summary = "agent-compose run completed"
 	}
+	if err != nil && (errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, ctx.Err()
+	}
+	if truncated {
+		result.ErrorCode = outputTruncatedCode
+		result.ErrorMessage = "agent-compose output exceeded the capture limit"
+		result.Limitations = []string{outputTruncatedMarker}
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, nil
+	}
 
 	if err == nil {
 		return domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: result}, nil
-	}
-	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return domain.ExecutionResult{}, ctx.Err()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -113,6 +124,9 @@ type cappedBuffer struct {
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	original := len(p)
 	remaining := maxCapturedOutput - b.buf.Len()
 	if remaining <= 0 {
@@ -152,17 +166,28 @@ func extractSummary(stdout []byte) string {
 }
 
 func normalizeRaw(stdout, stderr []byte, args []string, started, finished time.Time) json.RawMessage {
-	var value any
-	if len(stdout) > 0 && json.Unmarshal(stdout, &value) == nil {
-		data, _ := json.Marshal(value)
-		return data
+	return normalizeRawCapture(stdout, stderr, args, started, finished, false, false)
+}
+
+func normalizeRawCapture(stdout, stderr []byte, args []string, started, finished time.Time, stdoutTruncated, stderrTruncated bool) json.RawMessage {
+	truncated := stdoutTruncated || stderrTruncated
+	if !truncated && json.Valid(stdout) && len(stdout) > 0 {
+		return append(json.RawMessage(nil), stdout...)
 	}
 	payload := map[string]any{
-		"stdout":      string(stdout),
-		"stderr":      string(stderr),
-		"arguments":   redactArguments(args),
-		"started_at":  started.UTC(),
-		"finished_at": finished.UTC(),
+		"stdout":            string(stdout),
+		"stdout_empty":      len(stdout) == 0,
+		"stdout_valid_json": json.Valid(stdout),
+		"stderr":            string(stderr),
+		"arguments":         redactArguments(args),
+		"started_at":        started.UTC(),
+		"finished_at":       finished.UTC(),
+		"truncated":         truncated,
+		"stdout_truncated":  stdoutTruncated,
+		"stderr_truncated":  stderrTruncated,
+	}
+	if truncated {
+		payload["truncation_marker"] = outputTruncatedMarker
 	}
 	data, _ := json.Marshal(payload)
 	return data

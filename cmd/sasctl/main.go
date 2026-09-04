@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Notyet1307/security-agent-suite/internal/doctor"
 )
 
 type client struct {
@@ -36,6 +39,8 @@ func main() {
 
 	var err error
 	switch args[0] {
+	case "doctor":
+		err = c.doctor(args[1:])
 	case "agents":
 		err = c.print("GET", "/v1/agents", nil)
 	case "list":
@@ -71,6 +76,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
+  sasctl [global flags] doctor
   sasctl [global flags] agents
   sasctl [global flags] list [--agent ID] [--status STATUS] [--limit N]
   sasctl [global flags] run --agent ID --file request.json
@@ -81,6 +87,20 @@ func usage() {
   sasctl [global flags] wait RUN_ID [--interval 1s] [--timeout 30m]
 
 Global flags must appear before the command.`)
+}
+
+func (c *client) doctor(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: sasctl [global flags] doctor")
+	}
+	report := doctor.Run(context.Background(), doctor.FromEnvironment(c.baseURL, c.apiKey, c.tenantID))
+	if err := report.WriteJSON(os.Stdout); err != nil {
+		return err
+	}
+	if report.RequiredFailures() {
+		return errors.New("doctor found required check failures")
+	}
+	return nil
 }
 
 func (c *client) createRun(args []string) error {

@@ -16,6 +16,7 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/policy"
 	"github.com/Notyet1307/security-agent-suite/internal/prompt"
 	memorystore "github.com/Notyet1307/security-agent-suite/internal/store/memory"
+	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
 
 func TestServiceCompletesMockRun(t *testing.T) {
@@ -73,4 +74,43 @@ func TestServiceApprovalGate(t *testing.T) {
 	if err != nil || approved.Status != domain.RunStatusQueued {
 		t.Fatalf("approve: run=%+v err=%v", approved, err)
 	}
+}
+
+type fixedExecutor struct{ result domain.ExecutionResult }
+
+func (e fixedExecutor) Name() string { return "future-executor" }
+func (e fixedExecutor) Execute(context.Context, domain.ExecutionRequest) (domain.ExecutionResult, error) {
+	return e.result, nil
+}
+
+func TestServiceGatesSuccessfulFutureExecutorOutput(t *testing.T) {
+	catalog, err := catalog.Load("../../configs/agents.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := fixedExecutor{result: domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{RawOutput: []byte(`{"protocol":"wrong"}`)}}}
+	service := New(Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, memorystore.New(), catalog, policy.New(), executor, prompt.New(), observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	run, created, err := service.CreateRun(context.Background(), "event-triage", domain.CreateRunRequest{RequestID: "req-gate", Mode: "triage", Inputs: []domain.InputRef{{Type: "alert", URI: "artifact://alerts/1"}}, Scope: domain.Scope{TenantID: "t1"}})
+	if err != nil || !created {
+		t.Fatalf("create run: created=%v err=%v", created, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded, getErr := service.GetRun(context.Background(), "t1", run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if loaded.Status.Terminal() {
+			if loaded.Status != domain.RunStatusFailed || loaded.Result == nil || loaded.Result.ErrorCode != validation.CodeContractInvalid {
+				t.Fatalf("unexpected gated result: %+v", loaded)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("run did not complete")
 }
