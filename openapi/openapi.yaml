@@ -38,6 +38,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
+        "503":
+          $ref: "#/components/responses/Error"
   /version:
     get:
       tags: [System]

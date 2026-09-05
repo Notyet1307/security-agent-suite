@@ -23,6 +23,7 @@ type Config struct {
 	RateLimitPerMinute int
 	Version            string
 	Commit             string
+	Ready              func() bool
 }
 
 type Server struct {
@@ -75,7 +76,11 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Ready == nil || !s.cfg.Ready() {
+		writeStatusError(w, r, http.StatusServiceUnavailable, "not_ready", "service dependencies are not ready")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 

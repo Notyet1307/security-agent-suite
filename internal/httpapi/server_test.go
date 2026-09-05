@@ -39,7 +39,7 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1 << 20, RateLimitPerMinute: 1000}, service, artifactStore, metrics, logger).Handler())
+	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1 << 20, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger).Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/healthz")
@@ -121,4 +121,51 @@ func responseStatus(resp *http.Response) int {
 		return 0
 	}
 	return resp.StatusCode
+}
+
+func TestReadinessUsesInjectedState(t *testing.T) {
+	metrics := observability.NewMetrics()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ready := false
+	handler := New(Config{Ready: func() bool { return ready }}, nil, nil, metrics, logger).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	request.Header.Set("X-Request-ID", "readiness-test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not-ready status=%d body=%s", response.Code, response.Body.String())
+	}
+	var failure errorResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
+		t.Fatalf("not-ready response is not structured JSON: %v", err)
+	}
+	if failure.Error.Code != "not_ready" || failure.Error.RequestID != "readiness-test" {
+		t.Fatalf("not-ready response=%+v", failure)
+	}
+
+	healthRequest := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthResponse := httptest.NewRecorder()
+	handler.ServeHTTP(healthResponse, healthRequest)
+	if healthResponse.Code != http.StatusOK {
+		t.Fatalf("health status=%d", healthResponse.Code)
+	}
+
+	ready = true
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("ready status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestReadinessDefaultsToNotReady(t *testing.T) {
+	metrics := observability.NewMetrics()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(Config{}, nil, nil, metrics, logger).Handler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil readiness status=%d body=%s", response.Code, response.Body.String())
+	}
 }

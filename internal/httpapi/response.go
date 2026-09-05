@@ -37,9 +37,13 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	}
+	writeStatusError(w, r, status, code, err.Error())
+}
+
+func writeStatusError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	payload := errorResponse{}
 	payload.Error.Code = code
-	payload.Error.Message = err.Error()
+	payload.Error.Message = message
 	payload.Error.RequestID = requestIDFromContext(r.Context())
 	writeJSON(w, status, payload)
 }
