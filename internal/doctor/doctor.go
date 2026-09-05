@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -84,9 +85,11 @@ type Config struct {
 }
 
 const (
-	defaultTimeout  = 5 * time.Second
-	maxTimeout      = 30 * time.Second
-	maxComposeBytes = 1 << 20
+	defaultTimeout        = 5 * time.Second
+	maxTimeout            = 30 * time.Second
+	maxComposeBytes       = 1 << 20
+	maxCommandOutputBytes = 64 << 10
+	agentComposeVersion   = "v2609.1.0"
 )
 
 func FromEnvironment(baseURL, apiKey, tenantID string) Config {
@@ -132,12 +135,11 @@ type ComposeValidation struct {
 type Dependencies struct {
 	HTTPClient  HTTPDoer
 	LookPath    func(string) (string, error)
-	RunCommand  func(context.Context, string, ...string) error
+	RunCommand  func(context.Context, string, ...string) ([]byte, error)
 	ReadFile    func(string) ([]byte, error)
 	DialContext func(context.Context, string, string) (net.Conn, error)
 
-	// These checks deliberately have no defaults: CLI/TCP success is not protocol health.
-	AgentComposeProtocol func(context.Context, string) error
+	AgentComposeProtocol func(context.Context, string, string) error
 	OctoBusProtocol      func(context.Context, string) error
 	ProviderProbe        func(context.Context, map[string]string) error
 	DockerInspect        func(context.Context, string, string) error
@@ -151,10 +153,22 @@ type HTTPDoer interface {
 }
 
 func Run(ctx context.Context, cfg Config) Report {
-	return RunWithDependencies(ctx, cfg, Dependencies{})
+	return run(ctx, cfg, Dependencies{}, true)
 }
 
 func RunWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Report {
+	return run(ctx, cfg, deps, true)
+}
+
+func RunRuntime(ctx context.Context, cfg Config) Report {
+	return run(ctx, cfg, Dependencies{}, false)
+}
+
+func RunRuntimeWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Report {
+	return run(ctx, cfg, deps, false)
+}
+
+func run(ctx context.Context, cfg Config, deps Dependencies, includeAPI bool) Report {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -164,28 +178,37 @@ func RunWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Rep
 	add := func(name string, required bool, status CheckStatus, message string) {
 		report.Checks = append(report.Checks, Check{Name: name, Status: status, Message: message, Required: required})
 	}
-	configOK := validateConfig(cfg) == nil
-	base, baseErr := parseURL(cfg.APIBaseURL, true)
+	runtimeConfigOK := validateRuntimeConfig(cfg) == nil
+	var base *url.URL
+	var baseErr error
+	if includeAPI {
+		base, baseErr = parseURL(cfg.APIBaseURL, true)
+	}
+	configOK := runtimeConfigOK && (!includeAPI || baseErr == nil)
 	if !configOK {
 		add("configuration", true, StatusFailed, "configuration is malformed or contains unsafe characters")
 	} else {
 		add("configuration", true, StatusPassed, "configuration is valid")
 	}
-	if baseErr != nil {
-		add("api_base_url", true, StatusFailed, "API base URL is malformed or uses an unsupported scheme")
-		add("api_health", true, StatusUnknown, "API health probe could not be verified")
-		add("api_readiness", true, StatusUnknown, "API readiness probe could not be verified")
-	} else {
-		add("api_base_url", true, StatusPassed, "API base URL is valid")
-		for _, p := range []struct{ name, path, label string }{{"api_health", "/healthz", "health"}, {"api_readiness", "/readyz", "readiness"}} {
-			if !configOK {
-				add(p.name, true, StatusUnknown, "API "+p.label+" probe could not be verified")
-				continue
+	if includeAPI {
+		if baseErr != nil {
+			add("api_base_url", true, StatusFailed, "API base URL is malformed or uses an unsupported scheme")
+			add("api_health", true, StatusUnknown, "API health probe could not be verified")
+			add("api_readiness", true, StatusUnknown, "API readiness probe could not be verified")
+		} else {
+			add("api_base_url", true, StatusPassed, "API base URL is valid")
+			for _, p := range []struct{ name, path, label string }{{"api_health", "/healthz", "health"}, {"api_readiness", "/readyz", "readiness"}} {
+				if !configOK {
+					add(p.name, true, StatusUnknown, "API "+p.label+" probe could not be verified")
+					continue
+				}
+				status, message := probeAPI(ctx, cfg, deps.HTTPClient, base, p.path, p.label)
+				add(p.name, true, status, message)
 			}
-			status, message := probeAPI(ctx, cfg, deps.HTTPClient, base, p.path, p.label)
-			add(p.name, true, status, message)
 		}
 	}
+	var binary string
+	var binaryErr error
 	switch {
 	case !configOK:
 		addIntegration(add, cfg.Executor == "agentcompose-cli", StatusUnknown, "integration checks could not be verified because configuration is invalid")
@@ -193,7 +216,7 @@ func RunWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Rep
 		addIntegration(add, false, StatusSkipped, "integration is optional in mock executor mode")
 	case cfg.Executor == "agentcompose-cli":
 		composeData, composeErr := inspectCompose(cfg.AgentComposeFile, deps.ReadFile)
-		binary, binaryErr := findBinary(cfg.AgentComposeBin, deps.LookPath)
+		binary, binaryErr = findBinary(cfg.AgentComposeBin, deps.LookPath)
 		composeStatus := StatusUnknown
 		validation := ComposeValidation{}
 		if composeErr != nil {
@@ -208,7 +231,7 @@ func RunWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Rep
 		}
 		if binaryErr != nil || binary == "" {
 			add("agent_compose_binary", true, StatusFailed, "agent-compose binary was not found")
-			add("agent_compose_version", true, StatusUnknown, "agent-compose version/help probe could not be verified")
+			add("agent_compose_version", true, StatusUnknown, "agent-compose version probe could not be verified")
 		} else {
 			add("agent_compose_binary", true, StatusPassed, "agent-compose binary is available")
 			status, message := probeAgentCompose(ctx, cfg.Timeout, binary, deps.RunCommand)
@@ -266,7 +289,13 @@ func RunWithDependencies(ctx context.Context, cfg Config, deps Dependencies) Rep
 		}
 	}
 	if cfg.Executor == "agentcompose-cli" {
-		addProtocolCheck(add, "agent_compose_protocol", "agent-compose", cfg.AgentComposeHost, configOK, deps.AgentComposeProtocol, cfg.Timeout, ctx)
+		var agentComposeProtocol func(context.Context, string) error
+		if deps.AgentComposeProtocol != nil && binaryErr == nil && binary != "" {
+			agentComposeProtocol = func(probeCtx context.Context, host string) error {
+				return deps.AgentComposeProtocol(probeCtx, binary, host)
+			}
+		}
+		addProtocolCheck(add, "agent_compose_protocol", "agent-compose", cfg.AgentComposeHost, configOK, agentComposeProtocol, cfg.Timeout, ctx)
 		addProtocolCheck(add, "octobus_protocol", "OctoBus", cfg.OctoBusHost, configOK, deps.OctoBusProtocol, cfg.Timeout, ctx)
 		if deps.OctoBusProxyProbe == nil || !configOK || !validHost(cfg.AgentComposeHost) || !validHost(cfg.OctoBusHost) {
 			add("octobus_proxy", true, StatusUnknown, "Sandbox to OctoBus proxy could not be verified")
@@ -333,29 +362,48 @@ func fillDefaults(deps Dependencies) Dependencies {
 	if deps.DialContext == nil {
 		deps.DialContext = d.DialContext
 	}
+	if deps.AgentComposeProtocol == nil {
+		run := deps.RunCommand
+		deps.AgentComposeProtocol = func(ctx context.Context, binary, host string) error {
+			return validateAgentComposeDaemon(ctx, binary, host, run)
+		}
+	}
+	if deps.DockerInspect == nil {
+		run := deps.RunCommand
+		deps.DockerInspect = func(ctx context.Context, binary, image string) error {
+			return inspectDockerImage(ctx, binary, image, run)
+		}
+	}
+	if deps.DNSProbe == nil {
+		deps.DNSProbe = d.DNSProbe
+	}
 	return deps
 }
 
 func DefaultDependencies() Dependencies {
+	run := runCommand
 	return Dependencies{
-		HTTPClient: &http.Client{Timeout: defaultTimeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }},
-		LookPath:   exec.LookPath,
-		RunCommand: func(ctx context.Context, name string, args ...string) error {
-			cmd := exec.CommandContext(ctx, name, args...)
-			cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-			return cmd.Run()
-		},
+		HTTPClient:  &http.Client{Timeout: defaultTimeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }},
+		LookPath:    exec.LookPath,
+		RunCommand:  run,
 		ReadFile:    readFile,
 		DialContext: (&net.Dialer{Timeout: defaultTimeout}).DialContext,
+		AgentComposeProtocol: func(ctx context.Context, binary, host string) error {
+			return validateAgentComposeDaemon(ctx, binary, host, run)
+		},
+		DockerInspect: func(ctx context.Context, binary, image string) error {
+			return inspectDockerImage(ctx, binary, image, run)
+		},
+		DNSProbe: func(ctx context.Context, host string) error {
+			_, err := net.DefaultResolver.LookupHost(ctx, host)
+			return err
+		},
 	}
 }
 
-func validateConfig(cfg Config) error {
+func validateRuntimeConfig(cfg Config) error {
 	if cfg.Executor != "mock" && cfg.Executor != "agentcompose-cli" {
 		return errors.New("unsupported executor")
-	}
-	if _, err := parseURL(cfg.APIBaseURL, true); err != nil {
-		return errors.New("invalid API base URL")
 	}
 	if unsafeCommand(cfg.AgentComposeBin) || unsafeCommand(cfg.DockerBin) {
 		return errors.New("unsafe command")
@@ -473,32 +521,215 @@ func findBinary(binary string, lookPath func(string) (string, error)) (string, e
 	return lookPath(binary)
 }
 
-func probeAgentCompose(ctx context.Context, timeout time.Duration, binary string, run func(context.Context, string, ...string) error) (CheckStatus, string) {
+type agentComposeBuildInfo struct {
+	Version         string   `json:"version"`
+	OS              string   `json:"os"`
+	Arch            string   `json:"arch"`
+	CompiledDrivers []string `json:"compiled_drivers"`
+}
+
+type agentComposeStatus struct {
+	Err  json.RawMessage `json:"err"`
+	Msg  string          `json:"msg"`
+	Data struct {
+		Version         string   `json:"version"`
+		OS              string   `json:"os"`
+		Arch            string   `json:"arch"`
+		CompiledDrivers []string `json:"compiled_drivers"`
+		Timestamp       float64  `json:"timestamp"`
+		Timezone        string   `json:"timezone"`
+		TimezoneOffset  *int     `json:"timezone_offset"`
+	} `json:"data"`
+}
+
+func probeAgentCompose(ctx context.Context, timeout time.Duration, binary string, run func(context.Context, string, ...string) ([]byte, error)) (CheckStatus, string) {
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if probeCtx.Err() != nil {
-		return StatusUnknown, "agent-compose version/help probe could not be verified"
+		return StatusUnknown, "agent-compose version probe could not be verified"
 	}
-	if err := run(probeCtx, binary, "--version"); err == nil {
-		if probeCtx.Err() != nil {
-			return StatusUnknown, "agent-compose version/help probe could not be verified"
-		}
-		return StatusPassed, "agent-compose version probe succeeded"
-	}
+	output, err := run(probeCtx, binary, "--json", "version")
 	if probeCtx.Err() != nil {
-		return StatusUnknown, "agent-compose version/help probe could not be verified"
+		return StatusUnknown, "agent-compose version probe could not be verified"
 	}
-	if err := run(probeCtx, binary, "--help"); err == nil {
-		if probeCtx.Err() != nil {
-			return StatusUnknown, "agent-compose version/help probe could not be verified"
+	if err != nil {
+		return StatusFailed, "agent-compose version probe failed"
+	}
+	var info agentComposeBuildInfo
+	if err := decodeStrictJSON(output, &info); err != nil || info.Version != agentComposeVersion || info.OS == "" || info.Arch == "" || info.CompiledDrivers == nil {
+		return StatusFailed, "agent-compose version response did not match the supported contract"
+	}
+	for _, driver := range info.CompiledDrivers {
+		if strings.TrimSpace(driver) == "" {
+			return StatusFailed, "agent-compose version response did not match the supported contract"
 		}
-		return StatusPassed, "agent-compose help probe succeeded"
 	}
-	if probeCtx.Err() != nil {
-		return StatusUnknown, "agent-compose version/help probe could not be verified"
-	}
-	return StatusFailed, "agent-compose did not respond to a version or help probe"
+	return StatusPassed, "agent-compose version matches the supported contract"
 }
+
+func validateAgentComposeDaemon(ctx context.Context, binary, host string, run func(context.Context, string, ...string) ([]byte, error)) error {
+	output, err := run(ctx, binary, "--json", "--host", host, "status")
+	if err != nil {
+		return errors.New("agent-compose daemon status failed")
+	}
+	var status agentComposeStatus
+	if err := decodeStrictJSON(output, &status); err != nil {
+		return errors.New("invalid agent-compose daemon status")
+	}
+	if !bytes.Equal(bytes.TrimSpace(status.Err), []byte("null")) || status.Msg != "OK" || status.Data.Version != agentComposeVersion || status.Data.OS == "" || status.Data.Arch == "" || status.Data.CompiledDrivers == nil || status.Data.Timestamp <= 0 || status.Data.Timezone == "" || status.Data.TimezoneOffset == nil {
+		return errors.New("unhealthy agent-compose daemon status")
+	}
+	return nil
+}
+
+type normalizedComposeProbe struct {
+	Name   string                 `json:"name"`
+	Agents []normalizedAgentProbe `json:"agents"`
+}
+
+type normalizedAgentProbe struct {
+	Name     string                 `json:"name"`
+	Enabled  json.RawMessage        `json:"enabled"`
+	Provider string                 `json:"provider"`
+	Image    string                 `json:"image"`
+	Driver   *normalizedDriverProbe `json:"driver"`
+}
+
+type normalizedDriverProbe struct {
+	Name         string          `json:"name"`
+	Boxlite      json.RawMessage `json:"boxlite"`
+	Docker       json.RawMessage `json:"docker"`
+	Microsandbox json.RawMessage `json:"microsandbox"`
+	K8s          json.RawMessage `json:"k8s"`
+}
+
+func validateNormalizedCompose(ctx context.Context, binary, path, expectedGuestImage string, run func(context.Context, string, ...string) ([]byte, error)) (ComposeValidation, error) {
+	output, err := run(ctx, binary, "--json", "--file", path, "config")
+	if err != nil {
+		return ComposeValidation{}, errors.New("agent-compose config validation failed")
+	}
+	return parseNormalizedCompose(output, expectedGuestImage)
+}
+
+func parseNormalizedCompose(data []byte, expectedGuestImage string) (ComposeValidation, error) {
+	if len(data) == 0 || len(data) > maxCommandOutputBytes {
+		return ComposeValidation{}, errors.New("invalid normalized compose JSON size")
+	}
+	var compose normalizedComposeProbe
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&compose); err != nil {
+		return ComposeValidation{}, errors.New("invalid normalized compose JSON")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return ComposeValidation{}, errors.New("multiple normalized compose JSON values")
+	}
+	if strings.TrimSpace(compose.Name) == "" {
+		return ComposeValidation{}, errors.New("normalized compose has no name")
+	}
+	if len(compose.Agents) == 0 {
+		return ComposeValidation{}, errors.New("normalized compose has no agents")
+	}
+	seen := make(map[string]struct{}, len(compose.Agents))
+	validation := ComposeValidation{Complete: true, ProviderConfigured: true}
+	expectedImage := strings.TrimSpace(expectedGuestImage)
+	enabled := 0
+	for _, agent := range compose.Agents {
+		name := strings.TrimSpace(agent.Name)
+		if name == "" {
+			return ComposeValidation{}, errors.New("normalized compose has an empty agent name")
+		}
+		if _, exists := seen[name]; exists {
+			return ComposeValidation{}, errors.New("normalized compose has duplicate agent names")
+		}
+		seen[name] = struct{}{}
+		if agent.Driver == nil || strings.TrimSpace(agent.Driver.Name) == "" {
+			return ComposeValidation{}, errors.New("normalized compose agent has no driver name")
+		}
+		if err := validateNormalizedDriver(agent.Driver); err != nil {
+			return ComposeValidation{}, err
+		}
+		enabledValue, err := normalizedBool(agent.Enabled)
+		if err != nil {
+			return ComposeValidation{}, err
+		}
+		if !enabledValue {
+			continue
+		}
+		enabled++
+		if strings.TrimSpace(agent.Provider) == "" {
+			validation.ProviderConfigured = false
+		}
+		if agent.Image == "" || agent.Image != expectedImage {
+			return ComposeValidation{}, errors.New("enabled normalized compose agent image does not match configured guest image")
+		}
+		if agent.Driver.Name == "docker" {
+			validation.UsesDocker = true
+		}
+	}
+	if enabled == 0 {
+		return ComposeValidation{}, errors.New("normalized compose has no enabled agents")
+	}
+	return validation, nil
+}
+
+func validateNormalizedDriver(driver *normalizedDriverProbe) error {
+	known := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{"boxlite", driver.Boxlite},
+		{"docker", driver.Docker},
+		{"microsandbox", driver.Microsandbox},
+		{"k8s", driver.K8s},
+	}
+	found := false
+	for _, item := range known {
+		if item.name == driver.Name {
+			if !jsonObject(item.raw) {
+				return errors.New("normalized compose driver subobject does not match driver name")
+			}
+			found = true
+			continue
+		}
+		if !jsonAbsentOrNull(item.raw) {
+			return errors.New("normalized compose has mismatched driver subobject")
+		}
+	}
+	if !found {
+		return errors.New("normalized compose has an unsupported driver")
+	}
+	return nil
+}
+
+func normalizedBool(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 {
+		return false, errors.New("normalized compose agent is missing enabled")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false, errors.New("normalized compose agent enabled is null")
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, errors.New("normalized compose agent enabled is not boolean")
+	}
+	return value, nil
+}
+
+func jsonObject(raw json.RawMessage) bool {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return false
+	}
+	return object != nil
+}
+
+func jsonAbsentOrNull(raw json.RawMessage) bool {
+	return len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
 func validateCompose(ctx context.Context, timeout time.Duration, binary, path string, data []byte, cfg Config, deps Dependencies) (CheckStatus, string, ComposeValidation) {
 	if err := unresolvedInterpolation(data, cfg); err != nil {
 		return StatusFailed, "compose interpolation could not be resolved", ComposeValidation{}
@@ -508,29 +739,90 @@ func validateCompose(ctx context.Context, timeout time.Duration, binary, path st
 	if probeCtx.Err() != nil {
 		return StatusUnknown, "compose configuration validation could not be completed", ComposeValidation{}
 	}
+	var validation ComposeValidation
+	var err error
 	if deps.ValidateCompose != nil {
-		validation, err := deps.ValidateCompose(probeCtx, binary, path)
-		if probeCtx.Err() != nil {
-			return StatusUnknown, "compose configuration validation could not be completed", ComposeValidation{}
-		}
-		if err != nil {
-			return StatusFailed, "compose configuration validation failed", ComposeValidation{}
-		}
-		if !validation.Complete {
-			return StatusUnknown, "complete compose configuration validation was not available", ComposeValidation{}
-		}
-		return StatusPassed, "compose configuration was validated", validation
-	}
-	if err := deps.RunCommand(probeCtx, binary, "-f", path, "config", "--quiet"); err != nil {
-		if probeCtx.Err() != nil {
-			return StatusUnknown, "compose configuration validation could not be completed", ComposeValidation{}
-		}
-		return StatusFailed, "compose configuration validation failed", ComposeValidation{}
+		validation, err = deps.ValidateCompose(probeCtx, binary, path)
+	} else {
+		validation, err = validateNormalizedCompose(probeCtx, binary, path, cfg.GuestImage, deps.RunCommand)
 	}
 	if probeCtx.Err() != nil {
 		return StatusUnknown, "compose configuration validation could not be completed", ComposeValidation{}
 	}
-	return StatusUnknown, "agent-compose config succeeded, but complete compose validation was not available", ComposeValidation{}
+	if err != nil {
+		return StatusFailed, "compose configuration validation failed", ComposeValidation{}
+	}
+	if !validation.Complete {
+		return StatusUnknown, "complete compose configuration validation was not available", ComposeValidation{}
+	}
+	return StatusPassed, "compose configuration was validated", validation
+}
+
+type cappedOutput struct {
+	bytes.Buffer
+	overflow bool
+}
+
+func (b *cappedOutput) Write(p []byte) (int, error) {
+	written := len(p)
+	remaining := maxCommandOutputBytes - b.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			_, _ = b.Buffer.Write(p[:remaining])
+		} else {
+			_, _ = b.Buffer.Write(p)
+		}
+	}
+	if len(p) > remaining {
+		b.overflow = true
+	}
+	return written, nil
+}
+
+func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var output cappedOutput
+	cmd.Stdout = &output
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	if output.overflow {
+		return nil, errors.New("command output exceeded diagnostic limit")
+	}
+	return output.Bytes(), nil
+}
+
+func decodeStrictJSON(data []byte, target any) error {
+	if len(data) == 0 || len(data) > maxCommandOutputBytes {
+		return errors.New("invalid JSON size")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("multiple JSON values")
+	}
+	return nil
+}
+
+func inspectDockerImage(ctx context.Context, binary, image string, run func(context.Context, string, ...string) ([]byte, error)) error {
+	output, err := run(ctx, binary, "image", "inspect", "--format", "{{.Id}}", image)
+	if err != nil {
+		return errors.New("Docker image inspect failed")
+	}
+	id := strings.TrimSpace(string(output))
+	if len(id) != len("sha256:")+64 || !strings.HasPrefix(id, "sha256:") {
+		return errors.New("Docker image inspect returned an invalid image ID")
+	}
+	for _, c := range id[len("sha256:"):] {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return errors.New("Docker image inspect returned an invalid image ID")
+		}
+	}
+	return nil
 }
 
 func unresolvedInterpolation(data []byte, cfg Config) error {
@@ -735,7 +1027,7 @@ func probeDocker(ctx context.Context, timeout time.Duration, binary, image strin
 	if probeCtx.Err() != nil {
 		return StatusUnknown, "Docker daemon and guest image could not be verified"
 	}
-	err = deps.RunCommand(probeCtx, resolved, "version")
+	_, err = deps.RunCommand(probeCtx, resolved, "version")
 	if probeCtx.Err() != nil {
 		return StatusUnknown, "Docker daemon and guest image could not be verified"
 	}
@@ -803,7 +1095,31 @@ func checkImage(image string) (CheckStatus, string) {
 	if len(value) > 512 || unsafeCommand(value) || strings.ContainsAny(value, " \t") {
 		return StatusFailed, "guest image configuration is malformed or unsafe"
 	}
-	return StatusPassed, "guest image is configured"
+	if strings.Contains(value, "@") {
+		if !validSHA256ImageDigest(value) {
+			return StatusFailed, "guest image digest is malformed or unsupported"
+		}
+		return StatusPassed, "guest image uses an explicit sha256 digest"
+	}
+	lastSegment := value[strings.LastIndex(value, "/")+1:]
+	tagSeparator := strings.LastIndex(lastSegment, ":")
+	if tagSeparator <= 0 || tagSeparator == len(lastSegment)-1 || lastSegment[tagSeparator+1:] == "latest" {
+		return StatusFailed, "guest image must use an explicit non-latest tag or sha256 digest"
+	}
+	return StatusPassed, "guest image uses an explicit non-latest tag"
+}
+
+func validSHA256ImageDigest(value string) bool {
+	name, digest, found := strings.Cut(value, "@")
+	if !found || name == "" || strings.Contains(digest, "@") || !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		return false
+	}
+	for _, char := range digest[len("sha256:"):] {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func checkProviders(providers map[string]string, composeKnown, composeProvider bool) (CheckStatus, string) {
@@ -812,13 +1128,13 @@ func checkProviders(providers map[string]string, composeKnown, composeProvider b
 			return StatusFailed, "provider setting is malformed or unsafe"
 		}
 	}
-	if len(providers) == 0 && composeKnown && !composeProvider {
-		return StatusFailed, "no provider setting is configured"
+	if composeKnown && !composeProvider {
+		return StatusFailed, "enabled compose agent provider declaration is missing"
 	}
 	if len(providers) == 0 && !composeProvider {
-		return StatusUnknown, "provider configuration could not be confirmed"
+		return StatusUnknown, "provider declarations could not be confirmed"
 	}
-	return StatusPassed, "provider settings are configured; provider connectivity was not probed"
+	return StatusPassed, "provider declarations present; connectivity not verified"
 }
 
 func aggregate(checks []Check) OverallStatus {

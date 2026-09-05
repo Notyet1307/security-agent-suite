@@ -1,7 +1,7 @@
 # Project Status
 
 **Version:** `v0.1.0-alpha.1`  
-**Status date:** 2026-09-03  
+**Status date:** 2026-09-05
 **Positioning:** runnable engineering baseline; not a production security-analysis product.
 
 ## Completed
@@ -17,15 +17,16 @@
 
 ## Verification evidence
 
-The following checks pass in the build environment:
+The following checks pass in the current worktree:
 
 ```text
-./scripts/verify.sh
-./scripts/smoke.sh
-go test -race ./... -timeout 180s
-bash -n scripts/*.sh
-YAML parse: 18 files
+make verify
+make race
+make smoke
+git diff --check
 ```
+
+PyYAML is not installed, so `make verify` skipped YAML syntax parsing; its semantic checks still validated five agents, 15 skills, JSON contracts, and local links. The fixed `agent-compose v2609.1.0` binary normalized the current five-Agent compose shape to 8,964 bytes, and the current Doctor parser returned `compose_file=passed`; this validates the pinned CLI contract, not runtime capability.
 
 The smoke test proves two critical paths:
 
@@ -36,10 +37,9 @@ The smoke test proves two critical paths:
 
 - No real customer data source is connected.
 - No real security finding is produced by Mock mode.
-- The current environment did not contain an agent-compose daemon, OctoBus deployment, Docker daemon, model provider credentials, or reviewed security tools, so real sandbox/capability integration is not certified yet.
+- Docker/OrbStack is available on the Mac mini. `agent-compose v2609.1.0` was temporarily source-built from exact commit `fee546bf137c56bb7473d3632b17ed14bdd3b54a`; its bare daemon `/api/version` and Doctor protocol checks passed, but agent-compose is not persistently deployed. OctoBus, Provider, Sandbox, and capability paths remain uncertified, so SAS-101 and target-environment readiness are not claimed green.
 - File storage is single-node development storage, not HA storage.
 - Kubernetes manifests are a production migration starting point, not a completed production deployment.
-- The repository has not been pushed to GitHub from this environment because the connected GitHub integration is read-only for repository creation and file writes.
 
 ## Next hard gate
 

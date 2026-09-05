@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/artifacts"
 	"github.com/Notyet1307/security-agent-suite/internal/catalog"
 	"github.com/Notyet1307/security-agent-suite/internal/config"
+	"github.com/Notyet1307/security-agent-suite/internal/doctor"
 	"github.com/Notyet1307/security-agent-suite/internal/executor"
 	agentcomposeexecutor "github.com/Notyet1307/security-agent-suite/internal/executor/agentcompose"
 	mockexecutor "github.com/Notyet1307/security-agent-suite/internal/executor/mock"
@@ -71,10 +73,34 @@ func main() {
 	}
 	defer service.Close()
 
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	var readiness atomic.Bool
+	var readinessDone <-chan struct{}
+	if cfg.Executor == "mock" {
+		readiness.Store(true)
+	} else {
+		doctorCfg := doctor.FromEnvironment("", cfg.APIKey, "")
+		doctorCfg.Executor = cfg.Executor
+		doctorCfg.AgentComposeBin = cfg.AgentComposeBin
+		doctorCfg.AgentComposeFile = cfg.AgentComposeFile
+		doctorCfg.AgentComposeHost = cfg.AgentComposeHost
+		ticker := time.NewTicker(30 * time.Second)
+		done := make(chan struct{})
+		readinessDone = done
+		go func() {
+			defer close(done)
+			defer ticker.Stop()
+			monitorReadiness(signalCtx, ticker.C, func(ctx context.Context) bool {
+				return !doctor.RunRuntime(ctx, doctorCfg).RequiredFailures()
+			}, &readiness)
+		}()
+	}
+
 	api := httpapi.New(httpapi.Config{
 		APIKey: cfg.APIKey, MaxBodyBytes: cfg.MaxBodyBytes,
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
-		Version:            version, Commit: commit,
+		Version:            version, Commit: commit, Ready: readiness.Load,
 	}, service, artifactStore, metrics, logger)
 
 	httpServer := &http.Server{
@@ -96,8 +122,6 @@ func main() {
 		serverErr <- httpServer.ListenAndServe()
 	}()
 
-	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopSignals()
 	select {
 	case <-signalCtx.Done():
 		logger.Info("shutdown signal received")
@@ -105,13 +129,30 @@ func main() {
 		if !errors.Is(err, http.ErrServerClosed) {
 			fatal(logger, "http server failed", err)
 		}
-		return
+	}
+	stopSignals()
+	if readinessDone != nil {
+		<-readinessDone
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http shutdown", "error", err)
+	}
+}
+
+func monitorReadiness(ctx context.Context, ticks <-chan time.Time, check func(context.Context) bool, ready *atomic.Bool) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		ready.Store(check(ctx))
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+		}
 	}
 }
 

@@ -68,15 +68,25 @@ CLI 适配器适合起步，但生产目标应是官方稳定 API：
 
 在接口稳定前，保留 `Executor` Port，避免上层业务依赖 agent-compose 内部模型。
 
-## 6. 版本与升级
+## 6. Doctor 与 readiness
 
-- agent-compose 镜像必须固定 tag 或 digest；
+Doctor 固定支持 agent-compose `v2609.1.0`：`agent-compose --json version` 必须返回完整且匹配的 build JSON；daemon 使用 `agent-compose --json --host <daemon> status`，严格校验 `/api/version` envelope。Doctor 的 compose 检查运行 `agent-compose --json --file <path> config`，只解析一个 normalized JSON object 并验证声明形状、Provider 声明和 Driver 适用性；不会以 `config --quiet` 的零退出作 complete fallback。每个 normalized agent 必须显式包含布尔值 `enabled`。当前 suite 的单镜像 readiness policy 要求每个 enabled agent 的 canonical `image` 非空，并与 trim 后的 `AGENT_COMPOSE_GUEST_IMAGE` 完全相等；`build` 不能替代 `image`。因此后续一次 Docker inspect 检查的正是运行声明使用的镜像。SAS-101 只拒绝无 tag、`:latest` 和畸形 digest；普通版本 tag 仍是可变引用，不能当作 SAS-102 的 immutable digest 验收。
+
+Provider 检查通过只表示 enabled agent 存在非空 provider declaration，不表示 Provider 已真实配置或可连通；连通性由独立 required probe 判定，无法权威验证时保持 `unknown`。normalized 输出按 64 KiB 上限 fail-closed；当前五 Agent 配置实测 8,964 bytes（约 8.8 KiB）。
+
+人工预检仍可使用 `agent-compose -f <path> config --quiet`。但 `config` 可能解析 operator-owned compose 声明的外部 scheduler/script source，不能宣称零 I/O；Doctor 测试通过注入命令执行器保持离线。
+
+`/readyz` 不直接运行命令，而是读取后台缓存的 runtime-only doctor 结果。Mock 完成服务启动即 ready；`agentcompose-cli` 的任一 required 检查不是 `passed` 时返回结构化 503。固定版没有 capability CLI；在 Connect 编码及目标环境协议未确认前，OctoBus、Provider 和 Sandbox→proxy 保持 `unknown`，不得用 TCP 连通或离线 fixture 替代。
+
+## 7. 版本与升级
+
+- SAS-102 必须将 agent-compose Guest 镜像固定为 `sha256` digest，并写入 release manifest；普通版本 tag 不满足不可变性验收；
 - 升级前运行五个 Agent 的固定评测集；
 - 对 compose schema、CLI JSON 和 capset 注入做兼容测试；
 - Sandbox 已启动后不会自动获得新配置，升级时按运行时语义重建；
 - Git/HTTP Skill 必须固定 SHA 和校验值；当前仓库使用本地 Skill。
 
-## 7. 故障处理
+## 8. 故障处理
 
 | 故障 | Go Run 结果 | 操作 |
 | --- | --- | --- |
