@@ -16,26 +16,45 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/doctor"
 )
 
+type doctorRunner func(context.Context, doctor.Config) doctor.Report
+
 type client struct {
-	baseURL  string
-	apiKey   string
-	tenantID string
-	http     *http.Client
+	baseURL   string
+	apiKey    string
+	tenantID  string
+	http      *http.Client
+	stdout    io.Writer
+	stderr    io.Writer
+	doctorRun doctorRunner
 }
 
 func main() {
-	global := flag.NewFlagSet("sasctl", flag.ExitOnError)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, doctor.Run))
+}
+
+func run(args []string, stdout, stderr io.Writer, doctorRun doctorRunner) int {
+
+	global := flag.NewFlagSet("sasctl", flag.ContinueOnError)
+	global.SetOutput(stderr)
 	baseURL := global.String("base-url", env("SAS_BASE_URL", "http://127.0.0.1:8080"), "Security Agent Suite API base URL")
 	apiKey := global.String("api-key", os.Getenv("SAS_API_KEY"), "API key")
 	tenantID := global.String("tenant", env("SAS_TENANT_ID", "default"), "tenant id")
-	global.Usage = usage
-	_ = global.Parse(os.Args[1:])
-	args := global.Args()
-	if len(args) == 0 {
-		usage()
-		os.Exit(2)
+	global.Usage = func() { writeUsage(stderr) }
+	if err := global.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
 	}
-	c := &client{baseURL: strings.TrimRight(*baseURL, "/"), apiKey: *apiKey, tenantID: *tenantID, http: &http.Client{Timeout: 90 * time.Second}}
+	args = global.Args()
+	if len(args) == 0 {
+		writeUsage(stderr)
+		return 2
+	}
+	c := &client{
+		baseURL: strings.TrimRight(*baseURL, "/"), apiKey: *apiKey, tenantID: *tenantID,
+		http: &http.Client{Timeout: 90 * time.Second}, stdout: stdout, stderr: stderr, doctorRun: doctorRun,
+	}
 
 	var err error
 	switch args[0] {
@@ -69,13 +88,15 @@ func main() {
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
 	}
+	return 0
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, `Usage:
+func writeUsage(w io.Writer) {
+
+	fmt.Fprintln(w, `Usage:
   sasctl [global flags] doctor
   sasctl [global flags] agents
   sasctl [global flags] list [--agent ID] [--status STATUS] [--limit N]
@@ -93,8 +114,8 @@ func (c *client) doctor(args []string) error {
 	if len(args) != 0 {
 		return errors.New("usage: sasctl [global flags] doctor")
 	}
-	report := doctor.Run(context.Background(), doctor.FromEnvironment(c.baseURL, c.apiKey, c.tenantID))
-	if err := report.WriteJSON(os.Stdout); err != nil {
+	report := c.doctorRun(context.Background(), doctor.FromEnvironment(c.baseURL, c.apiKey, c.tenantID))
+	if err := report.WriteJSON(c.stdout); err != nil {
 		return err
 	}
 	if report.RequiredFailures() {
@@ -103,8 +124,14 @@ func (c *client) doctor(args []string) error {
 	return nil
 }
 
+func (c *client) newFlagSet(name string) *flag.FlagSet {
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(c.stderr)
+	return flags
+}
+
 func (c *client) createRun(args []string) error {
-	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+	flags := c.newFlagSet("run")
 	agent := flags.String("agent", "", "agent id")
 	filePath := flags.String("file", "", "request JSON file")
 	if err := flags.Parse(args); err != nil {
@@ -121,7 +148,7 @@ func (c *client) createRun(args []string) error {
 }
 
 func (c *client) listRuns(args []string) error {
-	flags := flag.NewFlagSet("list", flag.ContinueOnError)
+	flags := c.newFlagSet("list")
 	agent := flags.String("agent", "", "agent id")
 	status := flags.String("status", "", "run status")
 	limit := flags.Int("limit", 50, "maximum results")
@@ -143,7 +170,7 @@ func (c *client) approve(args []string) error {
 		return errors.New("run id is required")
 	}
 	runID := args[0]
-	flags := flag.NewFlagSet("approve", flag.ContinueOnError)
+	flags := c.newFlagSet("approve")
 	approvalID := flags.String("approval-id", "", "approval reference")
 	actor := flags.String("actor", "", "approver")
 	reason := flags.String("reason", "", "approval reason")
@@ -159,7 +186,7 @@ func (c *client) cancel(args []string) error {
 		return errors.New("run id is required")
 	}
 	runID := args[0]
-	flags := flag.NewFlagSet("cancel", flag.ContinueOnError)
+	flags := c.newFlagSet("cancel")
 	actor := flags.String("actor", "sasctl", "actor")
 	reason := flags.String("reason", "cancelled by operator", "reason")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -174,7 +201,7 @@ func (c *client) wait(args []string) error {
 		return errors.New("run id is required")
 	}
 	runID := args[0]
-	flags := flag.NewFlagSet("wait", flag.ContinueOnError)
+	flags := c.newFlagSet("wait")
 	interval := flags.Duration("interval", time.Second, "poll interval")
 	timeout := flags.Duration("timeout", 30*time.Minute, "maximum wait")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -197,7 +224,7 @@ func (c *client) wait(args []string) error {
 		}
 		switch run.Status {
 		case "succeeded", "partial", "failed", "cancelled", "waiting_approval":
-			return printJSON(data)
+			return printJSONTo(c.stdout, data)
 		}
 		if time.Now().After(deadline) {
 			return errors.New("wait timeout exceeded")
@@ -211,8 +238,8 @@ func (c *client) print(method, path string, body []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := printJSON(data); err != nil {
-		fmt.Println(string(data))
+	if err := printJSONTo(c.stdout, data); err != nil {
+		fmt.Fprintln(c.stdout, string(data))
 	}
 	if status >= 400 {
 		return fmt.Errorf("HTTP %d", status)
@@ -246,7 +273,7 @@ func (c *client) do(method, path string, body []byte) ([]byte, int, error) {
 	return data, resp.StatusCode, err
 }
 
-func printJSON(data []byte) error {
+func printJSONTo(w io.Writer, data []byte) error {
 	var value any
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
@@ -255,8 +282,8 @@ func printJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(pretty))
-	return nil
+	_, err = fmt.Fprintln(w, string(pretty))
+	return err
 }
 
 func env(key, fallback string) string {
