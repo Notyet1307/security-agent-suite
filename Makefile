@@ -6,7 +6,7 @@ export
 BINARY_DIR := bin
 GO ?= go
 
-.PHONY: help fmt test race vet build run smoke verify clean package
+.PHONY: help fmt test race vet build run smoke contract-smoke verify clean package
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 	  'make build    - build sasd and sasctl' \
 	  'make run      - run the API (executor is read from .env)' \
 	  'make smoke    - run an HTTP smoke test' \
+	  'make contract-smoke - verify the agent-compose runtime envelope fixture' \
 	  'make verify   - fmt check, vet, tests, build and contract checks' \
 	  'make package  - create dist archives'
 
@@ -42,6 +43,9 @@ run:
 
 smoke:
 	./scripts/smoke.sh
+
+contract-smoke:
+	./scripts/contract-smoke.sh
 
 verify:
 	./scripts/verify.sh

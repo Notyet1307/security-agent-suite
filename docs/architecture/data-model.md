@@ -18,6 +18,12 @@
 - `status`、`version`、时间戳；
 - `approval`、`events`、`result`。
 
+### Runtime Provenance（M1）
+
+`RunResult.provenance` 是可选的附加对象，字段全部可选，不改变 `/v1` 既有请求或响应的必填集合。字符串字段为 `daemon_run_id`、`daemon_run_short_id`、`project_id`、`project_name`、`agent_name`、`source`、`sandbox_id`、`sandbox_short_id`、`status`、`provider`、`thread_id`、`stop_reason`、`final_text_source`、`driver`、`image_ref`、`started_at`、`completed_at` 和 `cleanup_error`；`duration_ms` 为整数，`warnings` 为字符串数组，`labels` 为字符串键值映射。
+
+只允许从受信任且已成功解码的 runtime 元数据复制这些字段；不得从 Prompt、transcript 或模型文本推断。模型、Skill、工具版本若运行时元数据没有提供，就保持缺失，不补造版本字段。Envelope 解码失败或输出被截断时不得生成任何 provenance；完整 envelope 仍作为受控 Artifact 原样保留。
+
 ### Evidence
 
 可复核观察事实。最小信息：来源、采集时间、原始对象哈希、工具名称和版本、参数模板、输出位置、摘要和完整性信息。
@@ -76,4 +82,4 @@ Tenant
 - 新增可选字段属于兼容变更；
 - 删除字段、改变语义、枚举收缩必须进入 v2；
 - Agent Pack、Skill、工具服务和模板均应使用独立语义版本；
-- Run 需记录执行时的模型、Agent Pack、Skill、工具和模板版本，当前骨架尚未全部持久化，列为 M1/M2 任务。
+- Runtime provenance 仅在 runtime 提供相应元数据时记录可用的执行版本信息；缺失的模型、Skill 和工具版本保持缺失，不由控制面推断或补造，完整版本闭环列为 M1/M2 任务。

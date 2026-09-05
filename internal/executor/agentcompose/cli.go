@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -29,6 +30,164 @@ type Config struct {
 	RemoveSandbox bool
 }
 
+// AgentComposeRunEnvelope is the controlled v2609.1.0 CLI response. Output is
+// transcript only; ResultJSON is the provider result container.
+type AgentComposeRunEnvelope struct {
+	ID             string            `json:"id"`
+	ShortID        string            `json:"short_id"`
+	ProjectID      string            `json:"project_id"`
+	ProjectName    string            `json:"project_name"`
+	AgentName      string            `json:"agent_name"`
+	Source         string            `json:"source"`
+	Status         string            `json:"status"`
+	SandboxID      string            `json:"sandbox_id"`
+	SandboxShortID string            `json:"sandbox_short_id"`
+	ExitCode       int32             `json:"exit_code"`
+	Error          string            `json:"error"`
+	StartedAt      string            `json:"started_at"`
+	CompletedAt    string            `json:"completed_at"`
+	DurationMs     int64             `json:"duration_ms"`
+	Prompt         string            `json:"prompt"`
+	Output         string            `json:"output"`
+	ResultJSON     string            `json:"result_json"`
+	LogsPath       string            `json:"logs_path"`
+	ArtifactsDir   string            `json:"artifacts_dir"`
+	CleanupError   string            `json:"cleanup_error"`
+	Driver         string            `json:"driver"`
+	ImageRef       string            `json:"image_ref"`
+	Warnings       []string          `json:"warnings"`
+	Labels         map[string]string `json:"labels"`
+	LogsCommand    string            `json:"logs_command"`
+	JupyterURL     string            `json:"jupyter_url"`
+	JupyterPath    string            `json:"jupyter_path"`
+}
+
+func (e *AgentComposeRunEnvelope) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		ID             string            `json:"id"`
+		ShortID        string            `json:"short_id"`
+		ProjectID      string            `json:"project_id"`
+		ProjectName    string            `json:"project_name"`
+		AgentName      string            `json:"agent_name"`
+		Source         string            `json:"source"`
+		Status         string            `json:"status"`
+		SandboxID      string            `json:"sandbox_id"`
+		SandboxShortID string            `json:"sandbox_short_id"`
+		ExitCode       int32             `json:"exit_code"`
+		Error          string            `json:"error"`
+		StartedAt      string            `json:"started_at"`
+		CompletedAt    string            `json:"completed_at"`
+		DurationMs     int64             `json:"duration_ms"`
+		Prompt         string            `json:"prompt"`
+		Output         json.RawMessage   `json:"output"`
+		ResultJSON     json.RawMessage   `json:"result_json"`
+		LogsPath       string            `json:"logs_path"`
+		ArtifactsDir   string            `json:"artifacts_dir"`
+		CleanupError   string            `json:"cleanup_error"`
+		Driver         string            `json:"driver"`
+		ImageRef       string            `json:"image_ref"`
+		Warnings       []string          `json:"warnings"`
+		Labels         map[string]string `json:"labels"`
+		LogsCommand    string            `json:"logs_command"`
+		JupyterURL     string            `json:"jupyter_url"`
+		JupyterPath    string            `json:"jupyter_path"`
+	}
+	var value wire
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*e = AgentComposeRunEnvelope{ID: value.ID, ShortID: value.ShortID, ProjectID: value.ProjectID, ProjectName: value.ProjectName, AgentName: value.AgentName, Source: value.Source, Status: value.Status, SandboxID: value.SandboxID, SandboxShortID: value.SandboxShortID, ExitCode: value.ExitCode, Error: value.Error, StartedAt: value.StartedAt, CompletedAt: value.CompletedAt, DurationMs: value.DurationMs, Prompt: value.Prompt, Output: runtimeFieldText(value.Output), ResultJSON: runtimeFieldText(value.ResultJSON), LogsPath: value.LogsPath, ArtifactsDir: value.ArtifactsDir, CleanupError: value.CleanupError, Driver: value.Driver, ImageRef: value.ImageRef, Warnings: value.Warnings, Labels: value.Labels, LogsCommand: value.LogsCommand, JupyterURL: value.JupyterURL, JupyterPath: value.JupyterPath}
+	return nil
+}
+
+func runtimeFieldText(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return string(raw)
+}
+
+type AgentComposeRuntimeResult struct {
+	Provider        string `json:"provider"`
+	ThreadID        string `json:"threadId"`
+	StopReason      string `json:"stopReason"`
+	FinalText       string `json:"finalText"`
+	FinalTextSource string `json:"finalTextSource"`
+	Transcript      string `json:"transcript"`
+	Stderr          string `json:"stderr"`
+}
+
+func ParseRuntimeEnvelope(raw []byte) (AgentComposeRunEnvelope, AgentComposeRuntimeResult, error) {
+	envelope, decodeErr := decodeRuntimeEnvelope(raw)
+	if decodeErr != nil {
+		return envelope, AgentComposeRuntimeResult{}, decodeErr
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return envelope, AgentComposeRuntimeResult{}, fmt.Errorf("runtime envelope is not an object: %w", err)
+	}
+	for _, field := range []string{"status", "exit_code", "result_json"} {
+		if _, ok := fields[field]; !ok {
+			return envelope, AgentComposeRuntimeResult{}, fmt.Errorf("runtime envelope %s is required", field)
+		}
+	}
+	if rawExitCode := bytes.TrimSpace(fields["exit_code"]); len(rawExitCode) == 0 || bytes.Equal(rawExitCode, []byte("null")) {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime envelope exit_code must be an integer")
+	}
+	var exitCode int32
+	if err := json.Unmarshal(fields["exit_code"], &exitCode); err != nil {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime envelope exit_code must be an integer")
+	}
+	if strings.TrimSpace(envelope.Status) == "" {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime envelope status is required")
+	}
+	resultBytes := bytes.TrimSpace([]byte(envelope.ResultJSON))
+	if len(resultBytes) == 0 || bytes.Equal(resultBytes, []byte("null")) {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime envelope result_json is required")
+	}
+	var resultFields map[string]json.RawMessage
+	if err := json.Unmarshal(resultBytes, &resultFields); err != nil || resultFields == nil {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime result_json must be an object")
+	}
+	if _, ok := resultFields["finalText"]; !ok {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime result_json.finalText is required")
+	}
+	var result AgentComposeRuntimeResult
+	resultDecoder := json.NewDecoder(bytes.NewReader(resultBytes))
+	if err := resultDecoder.Decode(&result); err != nil {
+		return envelope, AgentComposeRuntimeResult{}, fmt.Errorf("runtime result_json is invalid: %w", err)
+	}
+	if err := ensureEOF(resultDecoder); err != nil {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime result_json contains trailing text")
+	}
+	if strings.TrimSpace(result.FinalText) == "" {
+		return envelope, AgentComposeRuntimeResult{}, errors.New("runtime result_json.finalText is required")
+	}
+	return envelope, result, nil
+}
+func decodeRuntimeEnvelope(raw []byte) (AgentComposeRunEnvelope, error) {
+	var envelope AgentComposeRunEnvelope
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&envelope); err != nil {
+		return envelope, fmt.Errorf("runtime envelope is not valid JSON: %w", err)
+	}
+	if err := ensureEOF(decoder); err != nil {
+		return envelope, errors.New("runtime envelope contains trailing text")
+	}
+	return envelope, nil
+}
+func ensureEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("trailing input")
+	}
+	return nil
+}
+
 type Executor struct {
 	cfg       Config
 	artifacts *artifacts.Store
@@ -44,7 +203,14 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	if strings.TrimSpace(e.cfg.Binary) == "" {
 		return domain.ExecutionResult{}, fmt.Errorf("agent-compose binary is not configured")
 	}
-	args := []string{"--json", "--timeout", e.cfg.Timeout.String()}
+	if e.artifacts == nil {
+		return domain.ExecutionResult{}, errors.New("artifact store is not configured")
+	}
+	timeout := request.Timeout
+	if timeout <= 0 {
+		timeout = e.cfg.Timeout
+	}
+	args := []string{"--json", "--timeout", timeout.String()}
 	if e.cfg.Host != "" {
 		args = append(args, "--host", e.cfg.Host)
 	}
@@ -62,60 +228,175 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	var stdout, stderr cappedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	started := time.Now()
 	err := cmd.Run()
 	finished := time.Now()
-
-	artifactsOut := make([]domain.ArtifactRef, 0, 2)
+	result := domain.RunResult{Executor: e.Name(), Summary: "agent-compose run completed"}
+	envelope, runtimeResult, parseErr := ParseRuntimeEnvelope(stdout.Bytes())
+	envelopeParseErr := parseErr
+	if parseErr != nil {
+		envelope, envelopeParseErr = decodeRuntimeEnvelope(stdout.Bytes())
+	}
+	truncated := stdout.truncated || stderr.truncated
+	if !truncated && envelopeParseErr == nil && (parseErr == nil || runtimeFailureEnvelope(envelope)) {
+		result.Provenance = executionProvenance(envelope, runtimeResult)
+	}
+	artifactsOut := make([]domain.ArtifactRef, 0, 3)
 	if stdout.Len() > 0 {
-		artifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-stdout.json", "application/json", stdout.Bytes(), finished)
+		// Keep the exact daemon response in a controlled artifact for review.
+		envelopeArtifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-runtime-envelope.json", "application/json", stdout.Bytes(), finished)
 		if putErr != nil {
 			return domain.ExecutionResult{}, putErr
 		}
-		artifactsOut = append(artifactsOut, artifact)
+		artifactsOut = append(artifactsOut, envelopeArtifact)
+		if !truncated && envelopeParseErr == nil {
+			transcript := redactPrompt(runtimeTranscript(envelope.Output), request.Prompt)
+			if len(transcript) > 0 {
+				artifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-stdout.json", "text/plain", transcript, finished)
+				if putErr != nil {
+					return domain.ExecutionResult{}, putErr
+				}
+				artifactsOut = append(artifactsOut, artifact)
+			}
+		}
 	}
 	if stderr.Len() > 0 {
-		artifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-stderr.log", "text/plain", stderr.Bytes(), finished)
+		artifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-stderr.log", "text/plain", redactPrompt(stderr.Bytes(), request.Prompt), finished)
 		if putErr != nil {
 			return domain.ExecutionResult{}, putErr
 		}
 		artifactsOut = append(artifactsOut, artifact)
 	}
-
-	truncated := stdout.truncated || stderr.truncated
-	raw := normalizeRawCapture(stdout.Bytes(), stderr.Bytes(), args, started, finished, stdout.truncated, stderr.truncated)
-	result := domain.RunResult{
-		Executor:  e.Name(),
-		Summary:   extractSummary(stdout.Bytes()),
-		Artifacts: artifactsOut,
-		RawOutput: raw,
+	if !truncated && parseErr == nil {
+		result.RawOutput = json.RawMessage(runtimeResult.FinalText)
+		// Controlled provider result: exact finalText is also the business RawOutput.
+		finalArtifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-final-output.json", "application/json", redactPrompt([]byte(runtimeResult.FinalText), request.Prompt), finished)
+		if putErr != nil {
+			return domain.ExecutionResult{}, putErr
+		}
+		artifactsOut = append(artifactsOut, finalArtifact)
 	}
-	if result.Summary == "" {
-		result.Summary = "agent-compose run completed"
-	}
+	result.Artifacts = artifactsOut
 	if err != nil && (errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, ctx.Err()
 	}
 	if truncated {
 		result.ErrorCode = outputTruncatedCode
-		result.ErrorMessage = "agent-compose output exceeded the capture limit"
+		result.ErrorMessage = domain.BoundedText("agent-compose output exceeded the capture limit", domain.MaxErrorMessageBytes)
 		result.Limitations = []string{outputTruncatedMarker}
 		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, nil
 	}
-
-	if err == nil {
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			result.ErrorCode = "agent_compose_exit"
+			result.ErrorMessage = domain.BoundedText(strings.TrimSpace(stderr.String()), domain.MaxErrorMessageBytes)
+			if result.ErrorMessage == "" {
+				result.ErrorMessage = domain.BoundedText(exitErr.Error(), domain.MaxErrorMessageBytes)
+			}
+			return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, nil
+		}
+		return domain.ExecutionResult{}, fmt.Errorf("start agent-compose: %w", err)
+	}
+	if parseErr != nil {
+		if envelopeParseErr == nil {
+			runtime := runtimeStatus(envelope)
+			if runtime == domain.RunStatusFailed {
+				result.ErrorCode = "agent_compose_runtime"
+				result.ErrorMessage = domain.BoundedText(envelope.Error, domain.MaxErrorMessageBytes)
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = "agent-compose runtime failed"
+				}
+				return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, nil
+			}
+			if runtime == domain.RunStatusPartial {
+				return domain.ExecutionResult{Status: domain.RunStatusPartial, Result: result}, nil
+			}
+		}
+		// Let the existing validation Gate classify malformed/missing provider output.
 		return domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: result}, nil
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		result.ErrorCode = "agent_compose_exit"
-		result.ErrorMessage = strings.TrimSpace(stderr.String())
+	status := runtimeStatus(envelope)
+	if status == domain.RunStatusFailed {
+		result.ErrorCode = "agent_compose_runtime"
+		result.ErrorMessage = domain.BoundedText(envelope.Error, domain.MaxErrorMessageBytes)
 		if result.ErrorMessage == "" {
-			result.ErrorMessage = exitErr.Error()
+			result.ErrorMessage = "agent-compose runtime failed"
 		}
-		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, nil
 	}
-	return domain.ExecutionResult{}, fmt.Errorf("start agent-compose: %w", err)
+	return domain.ExecutionResult{Status: status, Result: result}, nil
+}
+
+func runtimeStatus(envelope AgentComposeRunEnvelope) domain.RunStatus {
+	if envelope.ExitCode != 0 || strings.TrimSpace(envelope.Error) != "" {
+		return domain.RunStatusFailed
+	}
+	switch strings.ToLower(strings.TrimSpace(envelope.Status)) {
+	case "completed", "succeeded", "success":
+		return domain.RunStatusSucceeded
+	case "partial":
+		return domain.RunStatusPartial
+	default:
+		return domain.RunStatusFailed
+	}
+}
+
+func runtimeFailureEnvelope(envelope AgentComposeRunEnvelope) bool {
+	status := strings.ToLower(strings.TrimSpace(envelope.Status))
+	if status == "partial" {
+		return true
+	}
+	return status == "failed" || status == "failure" || status == "error" || envelope.ExitCode != 0 || strings.TrimSpace(envelope.Error) != ""
+}
+
+func executionProvenance(envelope AgentComposeRunEnvelope, runtime AgentComposeRuntimeResult) *domain.ExecutionProvenance {
+	if strings.TrimSpace(envelope.Status) == "" {
+		return nil
+	}
+	labels := make(map[string]string, len(envelope.Labels))
+	for key, value := range envelope.Labels {
+		labels[key] = value
+	}
+	provenance := &domain.ExecutionProvenance{
+		DaemonRunID:      envelope.ID,
+		DaemonRunShortID: envelope.ShortID,
+		ProjectID:        envelope.ProjectID,
+		ProjectName:      envelope.ProjectName,
+		AgentName:        envelope.AgentName,
+		Source:           envelope.Source,
+		SandboxID:        envelope.SandboxID,
+		SandboxShortID:   envelope.SandboxShortID,
+		Status:           envelope.Status,
+		StopReason:       runtime.StopReason,
+		FinalTextSource:  runtime.FinalTextSource,
+		Driver:           envelope.Driver,
+		ImageRef:         envelope.ImageRef,
+		StartedAt:        envelope.StartedAt,
+		CompletedAt:      envelope.CompletedAt,
+		DurationMs:       envelope.DurationMs,
+		Warnings:         append([]string(nil), envelope.Warnings...),
+		Labels:           labels,
+		CleanupError:     envelope.CleanupError,
+		Provider:         runtime.Provider,
+		ThreadID:         runtime.ThreadID,
+	}
+	return provenance
+}
+
+func redactPrompt(data []byte, prompt string) []byte {
+	if prompt == "" {
+		return append([]byte(nil), data...)
+	}
+	redacted := bytes.ReplaceAll(data, []byte(prompt), []byte("<redacted-task-envelope>"))
+	if encoded, err := json.Marshal(prompt); err == nil && len(encoded) > 1 {
+		redacted = bytes.ReplaceAll(redacted, encoded[1:len(encoded)-1], []byte("<redacted-task-envelope>"))
+	}
+	return redacted
+}
+func runtimeTranscript(output string) []byte {
+	if strings.TrimSpace(output) == "" || strings.TrimSpace(output) == "null" {
+		return nil
+	}
+	return []byte(output)
 }
 
 type cappedBuffer struct {
@@ -144,62 +425,3 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) Bytes() []byte  { return b.buf.Bytes() }
 func (b *cappedBuffer) String() string { return b.buf.String() }
 func (b *cappedBuffer) Len() int       { return b.buf.Len() }
-
-func extractSummary(stdout []byte) string {
-	var payload map[string]any
-	if json.Unmarshal(stdout, &payload) != nil {
-		return strings.TrimSpace(string(stdout))
-	}
-	for _, key := range []string{"output", "summary", "message"} {
-		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	if result, ok := payload["result"].(map[string]any); ok {
-		for _, key := range []string{"output", "summary", "message"} {
-			if value, ok := result[key].(string); ok && strings.TrimSpace(value) != "" {
-				return strings.TrimSpace(value)
-			}
-		}
-	}
-	return ""
-}
-
-func normalizeRaw(stdout, stderr []byte, args []string, started, finished time.Time) json.RawMessage {
-	return normalizeRawCapture(stdout, stderr, args, started, finished, false, false)
-}
-
-func normalizeRawCapture(stdout, stderr []byte, args []string, started, finished time.Time, stdoutTruncated, stderrTruncated bool) json.RawMessage {
-	truncated := stdoutTruncated || stderrTruncated
-	if !truncated && json.Valid(stdout) && len(stdout) > 0 {
-		return append(json.RawMessage(nil), stdout...)
-	}
-	payload := map[string]any{
-		"stdout":            string(stdout),
-		"stdout_empty":      len(stdout) == 0,
-		"stdout_valid_json": json.Valid(stdout),
-		"stderr":            string(stderr),
-		"arguments":         redactArguments(args),
-		"started_at":        started.UTC(),
-		"finished_at":       finished.UTC(),
-		"truncated":         truncated,
-		"stdout_truncated":  stdoutTruncated,
-		"stderr_truncated":  stderrTruncated,
-	}
-	if truncated {
-		payload["truncation_marker"] = outputTruncatedMarker
-	}
-	data, _ := json.Marshal(payload)
-	return data
-}
-
-func redactArguments(args []string) []string {
-	result := append([]string(nil), args...)
-	for i := 0; i < len(result); i++ {
-		if result[i] == "--prompt" && i+1 < len(result) {
-			result[i+1] = "<redacted-task-envelope>"
-			i++
-		}
-	}
-	return result
-}

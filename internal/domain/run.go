@@ -5,7 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
+
+// Result text is bounded before it crosses the API or persistence boundary.
+const (
+	MaxSummaryBytes      = 4 << 10
+	MaxErrorMessageBytes = 16 << 10
+)
+
+func BoundedText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	value = value[:limit]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
+}
 
 type RunStatus string
 
@@ -158,16 +176,41 @@ type ArtifactRef struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type ExecutionProvenance struct {
+	DaemonRunID      string            `json:"daemon_run_id,omitempty"`
+	DaemonRunShortID string            `json:"daemon_run_short_id,omitempty"`
+	ProjectID        string            `json:"project_id,omitempty"`
+	ProjectName      string            `json:"project_name,omitempty"`
+	AgentName        string            `json:"agent_name,omitempty"`
+	Source           string            `json:"source,omitempty"`
+	SandboxID        string            `json:"sandbox_id,omitempty"`
+	SandboxShortID   string            `json:"sandbox_short_id,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	Provider         string            `json:"provider,omitempty"`
+	ThreadID         string            `json:"thread_id,omitempty"`
+	StopReason       string            `json:"stop_reason,omitempty"`
+	FinalTextSource  string            `json:"final_text_source,omitempty"`
+	Driver           string            `json:"driver,omitempty"`
+	ImageRef         string            `json:"image_ref,omitempty"`
+	StartedAt        string            `json:"started_at,omitempty"`
+	CompletedAt      string            `json:"completed_at,omitempty"`
+	DurationMs       int64             `json:"duration_ms,omitempty"`
+	Warnings         []string          `json:"warnings,omitempty"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	CleanupError     string            `json:"cleanup_error,omitempty"`
+}
+
 type RunResult struct {
-	Executor     string          `json:"executor"`
-	Summary      string          `json:"summary"`
-	Evidence     []EvidenceRef   `json:"evidence,omitempty"`
-	Findings     []Finding       `json:"findings,omitempty"`
-	Artifacts    []ArtifactRef   `json:"artifacts,omitempty"`
-	Limitations  []string        `json:"limitations,omitempty"`
-	RawOutput    json.RawMessage `json:"raw_output,omitempty"`
-	ErrorCode    string          `json:"error_code,omitempty"`
-	ErrorMessage string          `json:"error_message,omitempty"`
+	Executor     string               `json:"executor"`
+	Summary      string               `json:"summary"`
+	Provenance   *ExecutionProvenance `json:"provenance,omitempty"`
+	Evidence     []EvidenceRef        `json:"evidence,omitempty"`
+	Findings     []Finding            `json:"findings,omitempty"`
+	Artifacts    []ArtifactRef        `json:"artifacts,omitempty"`
+	Limitations  []string             `json:"limitations,omitempty"`
+	RawOutput    json.RawMessage      `json:"raw_output,omitempty"`
+	ErrorCode    string               `json:"error_code,omitempty"`
+	ErrorMessage string               `json:"error_message,omitempty"`
 }
 
 type RunEvent struct {
@@ -259,8 +302,9 @@ func (r *Run) SetApproval(approval Approval, now time.Time) {
 	r.Policy.ApprovalID = approval.ID
 	r.RecordEvent("run.approved", "run approved", approval.Actor, map[string]string{"approval_id": approval.ID}, now)
 }
-
 func (r *Run) SetResult(result RunResult, now time.Time) {
+	result.Summary = BoundedText(result.Summary, MaxSummaryBytes)
+	result.ErrorMessage = BoundedText(result.ErrorMessage, MaxErrorMessageBytes)
 	r.Result = &result
 	r.UpdatedAt = now.UTC()
 	r.Version++

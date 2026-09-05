@@ -15,6 +15,7 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/observability"
 	"github.com/Notyet1307/security-agent-suite/internal/policy"
 	"github.com/Notyet1307/security-agent-suite/internal/prompt"
+	filestore "github.com/Notyet1307/security-agent-suite/internal/store/file"
 	memorystore "github.com/Notyet1307/security-agent-suite/internal/store/memory"
 	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
@@ -112,5 +113,55 @@ func TestServiceGatesSuccessfulFutureExecutorOutput(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatal("run did not complete")
+}
+
+func TestServicePersistsExecutionProvenance(t *testing.T) {
+	root := t.TempDir()
+	store, err := filestore.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := catalog.Load("../../configs/agents.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := []byte(`{"protocol":"security-agent-suite.event-triage.v1","status":"completed","summary":"ok","classification":"benign","severity":"informational","confidence":1,"hypotheses":[],"evidence":[],"findings":[],"recommended_actions":[],"limitations":[]}`)
+	executor := fixedExecutor{result: domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{
+		RawOutput:  output,
+		Provenance: &domain.ExecutionProvenance{DaemonRunID: "daemon-persisted", SandboxID: "sandbox-persisted", Provider: "pi"},
+	}}}
+	service := New(Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, store, catalog, policy.New(), executor, prompt.New(), observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	run, created, err := service.CreateRun(context.Background(), "event-triage", domain.CreateRunRequest{RequestID: "req-provenance", Mode: "triage", Scope: domain.Scope{TenantID: "tenant"}})
+	if err != nil || !created {
+		t.Fatalf("create run: created=%v err=%v", created, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded, getErr := service.GetRun(context.Background(), "tenant", run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if loaded.Status.Terminal() {
+			if loaded.Status != domain.RunStatusSucceeded || loaded.Result == nil || loaded.Result.Provenance == nil || loaded.Result.Provenance.DaemonRunID != "daemon-persisted" {
+				t.Fatalf("unexpected persisted result: %+v", loaded)
+			}
+			service.Close()
+			reloadedStore, reloadErr := filestore.New(root)
+			if reloadErr != nil {
+				t.Fatal(reloadErr)
+			}
+			reloaded, reloadErr := reloadedStore.Get(context.Background(), run.ID)
+			if reloadErr != nil || reloaded.Result == nil || reloaded.Result.Provenance == nil || reloaded.Result.Provenance.SandboxID != "sandbox-persisted" {
+				t.Fatalf("provenance did not survive reload: run=%+v err=%v", reloaded, reloadErr)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	service.Close()
 	t.Fatal("run did not complete")
 }

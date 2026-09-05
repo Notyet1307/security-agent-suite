@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,5 +37,37 @@ func TestApprovalTransition(t *testing.T) {
 	}
 	if run.Approval == nil || run.Status != RunStatusQueued {
 		t.Fatalf("approval not recorded: %+v", run)
+	}
+}
+func TestSetResultBoundsSummaryAndError(t *testing.T) {
+	run := NewRun("run-bounds", "event-triage", "event", CreateRunRequest{}, RunStatusRunning, time.Now())
+	run.SetResult(RunResult{Summary: strings.Repeat("你", MaxSummaryBytes), ErrorMessage: strings.Repeat("x", MaxErrorMessageBytes+10)}, time.Now())
+	if len([]byte(run.Result.Summary)) > MaxSummaryBytes || len([]byte(run.Result.ErrorMessage)) > MaxErrorMessageBytes {
+		t.Fatalf("result text exceeded bounds: summary=%d error=%d", len([]byte(run.Result.Summary)), len([]byte(run.Result.ErrorMessage)))
+	}
+}
+
+func TestExecutionProvenanceRoundTrips(t *testing.T) {
+	run := NewRun("run-provenance", "event-triage", "event", CreateRunRequest{}, RunStatusRunning, time.Now())
+	run.SetResult(RunResult{
+		Summary: "runtime",
+		Provenance: &ExecutionProvenance{
+			DaemonRunID: "daemon-1",
+			SandboxID:   "sandbox-1",
+			Provider:    "pi",
+			Warnings:    []string{"warning"},
+			Labels:      map[string]string{"suite": "test"},
+		},
+	}, time.Now())
+	data, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded Run
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Result == nil || loaded.Result.Provenance == nil || loaded.Result.Provenance.DaemonRunID != "daemon-1" || loaded.Result.Provenance.Labels["suite"] != "test" {
+		t.Fatalf("provenance did not round-trip: %+v", loaded.Result)
 	}
 }

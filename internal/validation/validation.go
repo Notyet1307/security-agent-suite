@@ -90,7 +90,7 @@ func parseWithTrusted(agentID string, raw []byte, allowEnvelope bool, trustedIDs
 	if err := validateEvidenceIntegrityWithTrusted(root, trustedIDs); err != nil {
 		return result, "", err
 	}
-	result.Summary = summary(root)
+	result.Summary = domain.BoundedText(summary(root), domain.MaxSummaryBytes)
 	result.Evidence = evidence(root)
 	result.Findings = findings(root)
 	status, _ := root["status"].(string)
@@ -107,46 +107,13 @@ func unwrapOutput(raw []byte) ([]byte, error) {
 		return nil, &Error{Code: CodeMalformed, Message: "agent output contains trailing JSON"}
 	}
 	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(document, &envelope); err != nil {
+	if err := json.Unmarshal(document, &envelope); err != nil || envelope == nil {
 		return nil, &Error{Code: CodeContractInvalid, Message: "agent output must be a JSON object"}
 	}
-	if envelope == nil {
-		return nil, &Error{Code: CodeContractInvalid, Message: "agent output must be a JSON object"}
+	if _, direct := envelope["protocol"]; !direct {
+		return nil, &Error{Code: CodeContractInvalid, Message: "runtime envelope transcript cannot be validated as provider output"}
 	}
-	if _, direct := envelope["protocol"]; direct {
-		return raw, nil
-	}
-	result, hasResult := envelope["result"]
-	output, hasOutput := envelope["output"]
-	if hasResult == hasOutput {
-		if !hasResult && isEmptyCapture(envelope) {
-			return nil, &Error{Code: CodeEmpty, Message: "agent output is empty"}
-		}
-		if !hasResult && isMalformedCapture(envelope) {
-			return nil, &Error{Code: CodeMalformed, Message: "agent output is not valid JSON"}
-		}
-		return nil, &Error{Code: CodeContractInvalid, Message: "agent output must contain exactly one result or output envelope"}
-	}
-	candidate := result
-	if hasOutput {
-		candidate = output
-	}
-	candidate = bytes.TrimSpace(candidate)
-	if len(candidate) == 0 {
-		return nil, &Error{Code: CodeContractInvalid, Message: "result or output envelope is empty"}
-	}
-	if candidate[0] == '"' {
-		var text string
-		if err := json.Unmarshal(candidate, &text); err != nil {
-			return nil, &Error{Code: CodeContractInvalid, Message: "result or output envelope must contain a JSON object or string"}
-		}
-		return []byte(text), nil
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(candidate, &object); err != nil || object == nil {
-		return nil, &Error{Code: CodeContractInvalid, Message: "result or output envelope must contain a JSON object or string"}
-	}
-	return candidate, nil
+	return raw, nil
 }
 
 func isEmptyCapture(envelope map[string]json.RawMessage) bool {
@@ -172,6 +139,8 @@ func SupportedAgents() []string {
 // Gate prevents any non-synthetic executor from treating an unvalidated successful
 // result as a security conclusion. Mock is deliberately marked by its own protocol.
 func Gate(agentID string, execution domain.ExecutionResult, executorName string) domain.ExecutionResult {
+	execution.Result.Summary = domain.BoundedText(execution.Result.Summary, domain.MaxSummaryBytes)
+	execution.Result.ErrorMessage = domain.BoundedText(execution.Result.ErrorMessage, domain.MaxErrorMessageBytes)
 	if executorName == "mock" && isSyntheticMock(execution.Result.RawOutput) {
 		return execution
 	}
@@ -179,17 +148,42 @@ func Gate(agentID string, execution domain.ExecutionResult, executorName string)
 		return execution
 	}
 	trustedIDs := trustedEvidenceIDs(execution.Result.Evidence)
-	parsed, status, err := parseWithTrusted(agentID, execution.Result.RawOutput, true, trustedIDs)
-	parsed.Executor = execution.Result.Executor
-	parsed.Artifacts = execution.Result.Artifacts
-	parsed.Evidence = trustedEvidence(execution.Result.Evidence)
+	original := execution.Result
+	parsed, status, err := parseWithTrusted(agentID, original.RawOutput, true, trustedIDs)
+	parsed.Executor = original.Executor
+	parsed.Provenance = original.Provenance
+	parsed.Artifacts = original.Artifacts
+	parsed.Evidence = trustedEvidence(original.Evidence)
+	parsed.Limitations = append([]string(nil), original.Limitations...)
+	parsed.ErrorCode = original.ErrorCode
+	parsed.ErrorMessage = domain.BoundedText(original.ErrorMessage, domain.MaxErrorMessageBytes)
 	if err == nil {
-		return domain.ExecutionResult{Status: status, Result: parsed}
+		return domain.ExecutionResult{Status: constrainedStatus(execution.Status, status), Result: parsed}
 	}
-	parsed.Summary = "agent output failed validation"
+	parsed.Summary = domain.BoundedText("agent output failed validation", domain.MaxSummaryBytes)
 	parsed.ErrorCode = Code(err)
-	parsed.ErrorMessage = err.Error()
+	parsed.ErrorMessage = domain.BoundedText(err.Error(), domain.MaxErrorMessageBytes)
 	return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: parsed}
+
+}
+
+func constrainedStatus(raw, payload domain.RunStatus) domain.RunStatus {
+	if raw == domain.RunStatusFailed {
+		return domain.RunStatusFailed
+	}
+	if raw == domain.RunStatusPartial {
+		if payload == domain.RunStatusFailed {
+			return domain.RunStatusFailed
+		}
+		return domain.RunStatusPartial
+	}
+	if payload == domain.RunStatusFailed {
+		return domain.RunStatusFailed
+	}
+	if payload == domain.RunStatusPartial {
+		return domain.RunStatusPartial
+	}
+	return domain.RunStatusSucceeded
 
 }
 

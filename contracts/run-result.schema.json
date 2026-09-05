@@ -71,6 +71,82 @@
       }
     },
     "raw_output": {},
+    "provenance": {
+      "type": "object",
+      "description": "Optional runtime metadata copied only from trusted decoded runtime metadata. It is omitted when unavailable; malformed or truncated envelopes must not synthesize it. The exact runtime envelope remains a controlled artifact.",
+      "additionalProperties": false,
+      "properties": {
+        "daemon_run_id": {
+          "type": "string"
+        },
+        "daemon_run_short_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "project_name": {
+          "type": "string"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "sandbox_id": {
+          "type": "string"
+        },
+        "sandbox_short_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "stop_reason": {
+          "type": "string"
+        },
+        "final_text_source": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "image_ref": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "completed_at": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "cleanup_error": {
+          "type": "string"
+        }
+      }
+    },
     "error_code": {
       "type": "string"
     },

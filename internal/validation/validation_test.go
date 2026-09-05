@@ -36,47 +36,42 @@ func TestGateMapsValidatedOutputStatuses(t *testing.T) {
 	}
 }
 
-func TestGateAcceptsOnlyOneLevelResultEnvelope(t *testing.T) {
-	valid := validEventOutput("completed")
-	quoted, err := json.Marshal(valid)
-	if err != nil {
-		t.Fatal(err)
+func TestGatePreservesExecutionProvenance(t *testing.T) {
+	provenance := &domain.ExecutionProvenance{DaemonRunID: "daemon-1", SandboxID: "sandbox-1", Provider: "pi"}
+	got := Gate("event-triage", domain.ExecutionResult{
+		Status: domain.RunStatusSucceeded,
+		Result: domain.RunResult{RawOutput: []byte(validEventOutput("completed")), Provenance: provenance},
+	}, "agentcompose-cli")
+	if got.Status != domain.RunStatusSucceeded || got.Result.Provenance != provenance {
+		t.Fatalf("provenance was not preserved: %+v", got.Result.Provenance)
 	}
-	wrongProtocol := strings.Replace(valid, `"security-agent-suite.event-triage.v1"`, `"wrong"`, 1)
-	tests := []struct {
-		name    string
-		raw     string
-		want    domain.RunStatus
-		wantErr bool
+}
+func TestGateCannotUpgradeRawPartialOrFailedStatus(t *testing.T) {
+	raw := []byte(validEventOutput("completed"))
+	for _, test := range []struct {
+		name string
+		raw  domain.RunStatus
+		want domain.RunStatus
 	}{
-		{name: "result object", raw: `{"result":` + valid + `}`, want: domain.RunStatusSucceeded},
-		{name: "output JSON string", raw: `{"output":` + string(quoted) + `}`, want: domain.RunStatusSucceeded},
-		{name: "recursive nesting", raw: `{"meta":{"result":` + valid + `}}`, want: domain.RunStatusFailed, wantErr: true},
-		{name: "wrong protocol", raw: `{"result":` + wrongProtocol + `}`, want: domain.RunStatusFailed, wantErr: true},
-		{name: "ambiguous envelopes", raw: `{"result":` + valid + `,"output":` + valid + `}`, want: domain.RunStatusFailed, wantErr: true},
-	}
-	for _, test := range tests {
+		{"partial", domain.RunStatusPartial, domain.RunStatusPartial},
+		{"failed", domain.RunStatusFailed, domain.RunStatusFailed},
+	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := Gate("event-triage", domain.ExecutionResult{
-				Status: domain.RunStatusSucceeded,
-				Result: domain.RunResult{RawOutput: []byte(test.raw)},
-			}, "future-executor")
+			got := Gate("event-triage", domain.ExecutionResult{Status: test.raw, Result: domain.RunResult{RawOutput: raw}}, "future-executor")
 			if got.Status != test.want {
-				t.Fatalf("status=%q want %q result=%+v", got.Status, test.want, got.Result)
-			}
-			if test.wantErr {
-				if got.Result.ErrorCode == "" {
-					t.Fatalf("expected validation error: %+v", got.Result)
-				}
-				return
-			}
-			if got.Result.ErrorCode != "" || got.Result.Summary != "ok" || string(got.Result.RawOutput) != test.raw {
-				t.Fatalf("result=%+v raw=%q", got.Result, got.Result.RawOutput)
+				t.Fatalf("status=%q want %q", got.Status, test.want)
 			}
 		})
 	}
-	if _, err := Parse("event-triage", []byte(tests[0].raw)); err == nil {
-		t.Fatal("Parse must remain strict about result envelopes")
+}
+
+func TestGateRejectsRuntimeTranscriptEnvelope(t *testing.T) {
+	valid := validEventOutput("completed")
+	for _, raw := range []string{`{"output":` + valid + `}`, `{"result":` + valid + `}`} {
+		got := Gate("event-triage", domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{RawOutput: []byte(raw)}}, "future-executor")
+		if got.Status != domain.RunStatusFailed || got.Result.ErrorCode != CodeContractInvalid {
+			t.Fatalf("runtime transcript was accepted: status=%q code=%q", got.Status, got.Result.ErrorCode)
+		}
 	}
 }
 
@@ -151,6 +146,20 @@ func TestGatePreservesSyntheticMockBypass(t *testing.T) {
 	got := Gate("event-triage", execution, "mock")
 	if got.Status != execution.Status || got.Result.Summary != execution.Result.Summary || string(got.Result.RawOutput) != raw || got.Result.ErrorCode != "" {
 		t.Fatalf("synthetic mock was not bypassed: %+v", got)
+	}
+}
+func TestGateBoundsEarlyResultText(t *testing.T) {
+	for _, status := range []domain.RunStatus{domain.RunStatusFailed, domain.RunStatusCancelled} {
+		execution := domain.ExecutionResult{Status: status, Result: domain.RunResult{Summary: strings.Repeat("s", domain.MaxSummaryBytes+1), ErrorMessage: strings.Repeat("e", domain.MaxErrorMessageBytes+1)}}
+		got := Gate("event-triage", execution, "future-executor")
+		if got.Status != status || len([]byte(got.Result.Summary)) > domain.MaxSummaryBytes || len([]byte(got.Result.ErrorMessage)) > domain.MaxErrorMessageBytes {
+			t.Fatalf("status=%q result text exceeded bounds", got.Status)
+		}
+	}
+	raw := []byte(`{"protocol":"security-agent-suite.mock-result.v1"}`)
+	got := Gate("event-triage", domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{Summary: strings.Repeat("s", domain.MaxSummaryBytes+1), ErrorMessage: strings.Repeat("e", domain.MaxErrorMessageBytes+1), RawOutput: raw}}, "mock")
+	if len([]byte(got.Result.Summary)) > domain.MaxSummaryBytes || len([]byte(got.Result.ErrorMessage)) > domain.MaxErrorMessageBytes {
+		t.Fatal("synthetic result text exceeded bounds")
 	}
 }
 

@@ -48,14 +48,12 @@ SAS_AGENT_COMPOSE_HOST=http://127.0.0.1:7410 \
 
 ## 4. 结果契约
 
-当前 CLI 适配器把：
+CLI 适配器的结果契约为：
 
-- CLI JSON 摘要；
-- stdout；
-- stderr；
-- 解析后的最终文本
-
-保存为 Artifact，并尝试抽取 Agent 的 JSON 输出。M1 必须补充严格的输出 Schema 验证；不通过 Schema 的运行只能是 `partial` 或 `failed`，不能标记为成功。
+- 完整 CLI JSON envelope 保存为受控 Artifact，仅供审计和排障；
+- 顶层 `output` 仅视为 transcript，普通副本会脱敏后保存；
+- 只有 `result_json.finalText` 进入业务结果：原文成为 `RunResult.RawOutput`，其普通 `final-output` 副本同样脱敏；
+- 应用层 `validation.Gate` 执行受支持的五类契约与 evidence 校验，并拒绝格式错误或不可信的输出。
 
 ## 5. 从 CLI 到 Connect/HTTP
 
