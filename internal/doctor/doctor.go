@@ -95,6 +95,7 @@ const (
 	maxComposeBytes       = 1 << 20
 	maxCommandOutputBytes = 64 << 10
 	agentComposeVersion   = "v2609.1.0"
+	releaseGuestImage     = "docker.io/chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9"
 	proxyProbeCommand     = `grpcurl -plaintext -H "x-capability-sandbox-token: $CAP_TOKEN" -H "x-octobus-capset: dev" -H "x-octobus-instance: calculator-test" -d '{"left":20,"right":22}' "$CAP_GRPC_TARGET" calculator.v1.CalculatorService/Add`
 	proxyProbeProject     = "sas101-doctor-probe"
 )
@@ -1250,20 +1251,24 @@ func octoBusProxyProbe(run func(context.Context, string, ...string) ([]byte, err
 }
 
 func inspectDockerImage(ctx context.Context, binary, image string, run func(context.Context, string, ...string) ([]byte, error)) error {
-	output, err := run(ctx, binary, "image", "inspect", "--format", "{{.Id}}", image)
+	if !validSHA256ImageDigest(image) {
+		return errors.New("Docker guest image reference is invalid")
+	}
+	output, err := run(ctx, binary, "image", "inspect", "--format", "{{json .RepoDigests}}", image)
 	if err != nil {
 		return errors.New("Docker image inspect failed")
 	}
-	id := strings.TrimSpace(string(output))
-	if len(id) != len("sha256:")+64 || !strings.HasPrefix(id, "sha256:") {
-		return errors.New("Docker image inspect returned an invalid image ID")
+	var repoDigests []string
+	if err := decodeStrictJSON(output, &repoDigests); err != nil || len(repoDigests) == 0 {
+		return errors.New("Docker image inspect returned invalid repository digests")
 	}
-	for _, c := range id[len("sha256:"):] {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return errors.New("Docker image inspect returned an invalid image ID")
+	want := strings.TrimPrefix(image, "docker.io/")
+	for _, digest := range repoDigests {
+		if validSHA256ImageDigest(digest) && strings.TrimPrefix(digest, "docker.io/") == want {
+			return nil
 		}
 	}
-	return nil
+	return errors.New("Docker image repository digest does not match configured guest image")
 }
 
 func unresolvedInterpolation(data []byte, cfg Config) error {
@@ -1543,18 +1548,13 @@ func checkImage(image string) (CheckStatus, string) {
 	if len(value) > 512 || unsafeCommand(value) || strings.ContainsAny(value, " \t") {
 		return StatusFailed, "guest image configuration is malformed or unsafe"
 	}
-	if strings.Contains(value, "@") {
-		if !validSHA256ImageDigest(value) {
-			return StatusFailed, "guest image digest is malformed or unsupported"
-		}
-		return StatusPassed, "guest image uses an explicit sha256 digest"
+	if !validSHA256ImageDigest(value) {
+		return StatusFailed, "guest image must use repository@sha256"
 	}
-	lastSegment := value[strings.LastIndex(value, "/")+1:]
-	tagSeparator := strings.LastIndex(lastSegment, ":")
-	if tagSeparator <= 0 || tagSeparator == len(lastSegment)-1 || lastSegment[tagSeparator+1:] == "latest" {
-		return StatusFailed, "guest image must use an explicit non-latest tag or sha256 digest"
+	if strings.TrimPrefix(value, "docker.io/") != strings.TrimPrefix(releaseGuestImage, "docker.io/") {
+		return StatusFailed, "guest image does not match the pinned release image"
 	}
-	return StatusPassed, "guest image uses an explicit non-latest tag"
+	return StatusPassed, "guest image matches the pinned release digest"
 }
 
 func validSHA256ImageDigest(value string) bool {

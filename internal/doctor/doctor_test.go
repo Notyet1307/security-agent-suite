@@ -24,14 +24,16 @@ agents:
       docker: {}
 `
 
-const normalizedComposeFixture = `{"name":"test","agents":[{"name":"demo","enabled":true,"provider":"pi","image":"guest:v1","driver":{"name":"docker","docker":{}}}]}`
+const testGuestImage = "docker.io/chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9"
+const testGuestRepoDigest = "chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9"
+const normalizedComposeFixture = `{"name":"test","agents":[{"name":"demo","enabled":true,"provider":"pi","image":"` + testGuestImage + `","driver":{"name":"docker","docker":{}}}]}`
 
 func testConfig(executor string) Config {
 	return Config{
 		APIBaseURL: "http://api.test", APIKey: "secret-api-key", TenantID: "tenant-a",
 		Executor: executor, AgentComposeBin: "agent-compose", AgentComposeFile: "agent-compose.yml",
 		AgentComposeHost: "http://compose.test:7410", OctoBusHost: "http://octobus.test:7420",
-		OctoBusProxySandboxID: strings.Repeat("a", 64), DockerBin: "docker", GuestImage: "guest:v1",
+		OctoBusProxySandboxID: strings.Repeat("a", 64), DockerBin: "docker", GuestImage: testGuestImage,
 		Models:    map[string]string{"SAS_AGENT_MODEL": "provider/model", "SAS_REPORT_MODEL": "provider/report", "SAS_STRONG_AGENT_MODEL": "provider/strong"},
 		Providers: map[string]string{"SAS_PROVIDER": "pi"}, Timeout: time.Second,
 	}
@@ -179,6 +181,18 @@ func TestRunSkipsOptionalAgentComposeInMockMode(t *testing.T) {
 	}
 }
 
+func TestMockGuestImageRemainsOptional(t *testing.T) {
+	for _, image := range []string{"", "chaitin/agent-compose-guest:v2609.1.0"} {
+		cfg := testConfig("mock")
+		cfg.GuestImage = image
+		report := RunWithDependencies(context.Background(), cfg, fakeDependencies(&fakeHTTP{}, composeFixture))
+		check := checkByName(report, "guest_image")
+		if check.Status != StatusSkipped || check.Required || report.ExitCode() != 0 {
+			t.Fatalf("mock guest image=%q check=%+v report=%+v", image, check, report)
+		}
+	}
+}
+
 func TestRunReportsFailedAPIReadiness(t *testing.T) {
 	client := &fakeHTTP{readiness: http.StatusServiceUnavailable}
 	report := RunWithDependencies(context.Background(), testConfig("mock"), fakeDependencies(client, composeFixture))
@@ -300,25 +314,24 @@ func TestUnverifiedIntegrationsFailClosed(t *testing.T) {
 
 func TestDefaultAdaptersUseInjectedRunCommand(t *testing.T) {
 	const statusJSON = `{"err":null,"msg":"OK","data":{"version":"v2609.1.0","os":"linux","arch":"arm64","compiled_drivers":["docker"],"timestamp":1783501631.25,"timezone":"UTC","timezone_offset":0}}`
-	const imageID = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	var calls []string
 	deps := fillDefaults(Dependencies{RunCommand: func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		if args[len(args)-1] == "status" {
 			return []byte(statusJSON), nil
 		}
-		return []byte(imageID), nil
+		return []byte(`["` + testGuestRepoDigest + `"]`), nil
 	}})
 
 	if err := deps.AgentComposeProtocol(context.Background(), "/resolved/agent-compose", "http://daemon.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := deps.DockerInspect(context.Background(), "/resolved/docker", "guest:v1"); err != nil {
+	if err := deps.DockerInspect(context.Background(), "/resolved/docker", testGuestImage); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"/resolved/agent-compose --json --host http://daemon.test status",
-		"/resolved/docker image inspect --format {{.Id}} guest:v1",
+		"/resolved/docker image inspect --format {{json .RepoDigests}} " + testGuestImage,
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("calls=%q", calls)
@@ -610,10 +623,10 @@ func TestComposeInterpolationAndDockerInspectFailClosed(t *testing.T) {
 		t.Fatalf("validator failure unexpectedly passed: %+v", report)
 	}
 	deps = fakeDependencies(&fakeHTTP{}, composeFixture)
-	deps.DockerInspect = func(context.Context, string, string) error { return errors.New("inspect failed") }
+	deps.DockerInspect = func(context.Context, string, string) error { return errors.New("repo digest mismatch") }
 	report = RunWithDependencies(context.Background(), cfg, deps)
-	if checkByName(report, "docker").Status != StatusFailed {
-		t.Fatalf("inspect failure unexpectedly passed: %+v", report)
+	if check := checkByName(report, "docker"); !check.Required || check.Status != StatusFailed || report.ExitCode() == 0 {
+		t.Fatalf("Docker RepoDigest mismatch unexpectedly passed: check=%+v report=%+v", checkByName(report, "docker"), report)
 	}
 }
 
@@ -654,9 +667,11 @@ func TestCheckImageRequiresPinnedReferenceShape(t *testing.T) {
 		image string
 		want  CheckStatus
 	}{
-		{name: "current version tag", image: "chaitin/agent-compose-guest:v2609.1.0", want: StatusPassed},
-		{name: "registry port and tag", image: "registry.example:5000/team/guest:v1", want: StatusPassed},
-		{name: "sha256 digest", image: "registry.example/team/guest@sha256:" + strings.Repeat("a", 64), want: StatusPassed},
+		{name: "current version tag", image: "chaitin/agent-compose-guest:v2609.1.0", want: StatusFailed},
+		{name: "registry port and tag", image: "registry.example:5000/team/guest:v1", want: StatusFailed},
+		{name: "release sha256 repository digest", image: testGuestImage, want: StatusPassed},
+		{name: "different well-formed digest", image: "registry.example/team/guest@sha256:" + strings.Repeat("a", 64), want: StatusFailed},
+		{name: "bare image ID", image: "sha256:" + strings.Repeat("a", 64), want: StatusFailed},
 		{name: "untagged", image: "registry.example/team/guest", want: StatusFailed},
 		{name: "latest", image: "registry.example/team/guest:latest", want: StatusFailed},
 		{name: "malformed digest", image: "registry.example/team/guest@sha512:" + strings.Repeat("a", 64), want: StatusFailed},
@@ -691,7 +706,7 @@ func TestComposePlaceholdersNeedEnvironmentValues(t *testing.T) {
 		"SAS_REPORT_MODEL":       "provider/report",
 		"SAS_STRONG_AGENT_MODEL": "provider/strong",
 	}
-	cfg.GuestImage = "guest:v1"
+	cfg.GuestImage = testGuestImage
 	report = RunWithDependencies(context.Background(), cfg, fakeDependencies(&fakeHTTP{}, composeFixture))
 	if checkByName(report, "compose_file").Status != StatusPassed || checkByName(report, "model_settings").Status != StatusPassed || checkByName(report, "guest_image").Status != StatusPassed {
 		t.Fatalf("resolved placeholders failed: %+v", report)
@@ -739,7 +754,7 @@ func TestDefaultComposeValidationDeterminesDockerApplicability(t *testing.T) {
 	if check := checkByName(report, "compose_file"); check.Status != StatusPassed {
 		t.Fatalf("compose check=%+v", check)
 	}
-	if check := checkByName(report, "docker"); !check.Required || check.Status != StatusPassed || inspectedImage != "guest:v1" {
+	if check := checkByName(report, "docker"); !check.Required || check.Status != StatusPassed || inspectedImage != testGuestImage {
 		t.Fatalf("Docker applicability/image was not determined: check=%+v image=%q", check, inspectedImage)
 	}
 }
@@ -764,7 +779,7 @@ func TestNormalizedImageMatchesConfiguredGuestImage(t *testing.T) {
 }
 
 func TestParseNormalizedCompose(t *testing.T) {
-	valid := normalizedComposeFixture
+	valid := strings.Replace(normalizedComposeFixture, testGuestImage, "guest:v1", 1)
 	tests := []struct {
 		name string
 		data string
@@ -818,7 +833,7 @@ func TestDefaultComposeValidationUsesInjectedRunCommand(t *testing.T) {
 		}
 		return []byte(normalizedComposeFixture), nil
 	}
-	validation, err := validateNormalizedCompose(context.Background(), "agent-compose", "compose.yml", "guest:v1", run)
+	validation, err := validateNormalizedCompose(context.Background(), "agent-compose", "compose.yml", testGuestImage, run)
 	if err != nil || !called || validation != (ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}) {
 		t.Fatalf("validation=(%+v,%v), called=%v", validation, err, called)
 	}
@@ -1223,26 +1238,36 @@ func TestAgentComposeDaemonStatusRequiresTimezoneOffset(t *testing.T) {
 	}
 }
 
-func TestDockerImageInspectUsesImageIDContract(t *testing.T) {
-	const imageID = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	err := inspectDockerImage(context.Background(), "/fake/docker", "guest:v1", func(_ context.Context, name string, args ...string) ([]byte, error) {
-		if name != "/fake/docker" || strings.Join(args, " ") != "image inspect --format {{.Id}} guest:v1" {
+func TestDockerImageInspectRequiresConfiguredRepoDigest(t *testing.T) {
+	err := inspectDockerImage(context.Background(), "/fake/docker", testGuestImage, func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name != "/fake/docker" || strings.Join(args, " ") != "image inspect --format {{json .RepoDigests}} "+testGuestImage {
 			t.Fatalf("command = %q %q", name, args)
 		}
-		return []byte(imageID + "\n"), nil
+		return []byte(`["` + testGuestRepoDigest + `"]`), nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inspectDockerImage(context.Background(), "docker", "missing:v1", func(context.Context, string, ...string) ([]byte, error) {
+
+	wrong := "chaitin/other@sha256:" + strings.Repeat("d", 64)
+	for _, output := range []string{
+		`"sha256:` + strings.Repeat("f", 64) + `"`,
+		`[]`,
+		`["` + wrong + `"]`,
+		`["` + testGuestRepoDigest + `"] {}`,
+		strings.Repeat(" ", maxCommandOutputBytes+1),
+	} {
+		if err := inspectDockerImage(context.Background(), "docker", testGuestImage, func(context.Context, string, ...string) ([]byte, error) {
+			return []byte(output), nil
+		}); err == nil {
+			t.Fatalf("Docker identity output %q unexpectedly passed", output)
+		}
+	}
+
+	if err := inspectDockerImage(context.Background(), "docker", testGuestImage, func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("not found")
 	}); err == nil {
 		t.Fatal("missing image unexpectedly passed")
-	}
-	if err := inspectDockerImage(context.Background(), "docker", "bad:v1", func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("not-an-image-id"), nil
-	}); err == nil {
-		t.Fatal("malformed image id unexpectedly passed")
 	}
 }
 

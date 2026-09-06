@@ -87,9 +87,9 @@ response:
 
 ## 6. 环境核验边界
 
-`sasctl doctor` 对固定的 OctoBus v0.2.0 只调用官方 `GET /admin/v1/status`，严格要求 HTTP 200 和精确 JSON 字段 `status`、`services`（`status` 必须为 `ok`，`services` 必须是非负整数）。响应体有界读取，禁止把响应内容或主机地址写入用户错误。
+`sasctl doctor` 对 OctoBus status interface 只调用官方 `GET /admin/v1/status`，严格要求 HTTP 200 和精确 JSON 字段 `status`、`services`（`status` 必须为 `ok`，`services` 必须是非负整数）。响应体有界读取，禁止把响应内容或主机地址写入用户错误。
 
-该状态接口只证明 OctoBus 控制协议健康，不自证版本、镜像 digest、能力服务或 capability proxy。版本和 digest 必须由目标环境清单固定；`services: 0` 不能作为 proxy 或业务能力 smoke 的通过证据。M1 doctor 另外要求固定 `sas101-doctor-probe` project 的 project-scoped Sandbox 列表只有指定 running/retained Docker Sandbox，再以固定 synthetic calculator `Add(20,22)` 验证 Sandbox→capability proxy→OctoBus 数据路径；v2609.1.0 的 JSON tag 会折叠重复 capset，完整 capset 隔离仍需 SAS-103 验收。
+当前 `linux/arm64` 已验证部署的 agent-compose、Guest 和 OctoBus RepoDigest 以 [`release-manifest.json`](../../release-manifest.json) 为准。Doctor 只检查 OctoBus status contract；该 status 及其 digest 都不能自证 OctoBus 版本、能力服务或 capability proxy，RepoDigest 也不会从 status 推断，而是 operator-verified deployment input。`services: 0` 不能作为 proxy 或业务能力 smoke 的通过证据。M1 doctor 另外要求固定 `sas101-doctor-probe` project 的 project-scoped Sandbox 列表只有指定 running/retained Docker Sandbox，再以固定 synthetic calculator `Add(20,22)` 验证 Sandbox→capability proxy→OctoBus 数据路径；v2609.1.0 的 JSON tag 会折叠重复 capset，完整 capset 隔离仍需 SAS-103 验收。
 
 ## 7. Provider connectivity probe
 

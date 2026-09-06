@@ -8,7 +8,19 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      - name: Verify repository
+        run: make verify
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -42,7 +54,13 @@ jobs:
             -o "dist/${OUT}/sasd${SUFFIX}" ./cmd/sasd
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
             go build -trimpath -ldflags "-s -w" -o "dist/${OUT}/sasctl${SUFFIX}" ./cmd/sasctl
-          cp README.md LICENSE NOTICE agent-compose.yml "dist/${OUT}/"
+          cp README.md LICENSE NOTICE "dist/${OUT}/"
+          if [[ "${{ matrix.goos }}/${{ matrix.goarch }}" == linux/arm64 ]]; then
+            cp agent-compose.yml release-manifest.json .env.example "dist/${OUT}/"
+            printf '%s\n' 'Verified agent-compose runtime artifact: linux/arm64.' > "dist/${OUT}/RUNTIME_SCOPE.txt"
+          else
+            printf '%s\n' 'Client/mock-only artifact: agent-compose runtime is not verified for this platform; release-manifest.json is intentionally omitted.' > "dist/${OUT}/RUNTIME_SCOPE.txt"
+          fi
           cp -R configs agents contracts openapi "dist/${OUT}/"
           if [[ "${{ matrix.goos }}" == windows ]]; then
             (cd dist && zip -qr "${OUT}.zip" "${OUT}")

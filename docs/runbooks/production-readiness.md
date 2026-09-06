@@ -5,7 +5,7 @@
 - [ ] PostgreSQL Store 和迁移完成；
 - [ ] 对象存储、KMS、签名下载和留存策略完成；
 - [ ] OIDC/mTLS/RBAC 完成；
-- [ ] agent-compose/OctoBus/Guest 镜像固定 digest；
+- [x] 当前 `linux/arm64` release contract 的 agent-compose、OctoBus、Guest RepoDigest 已固定（见 [`release-manifest.json`](../../release-manifest.json)）；其他平台与生产部署仍须单独核验；
 - [ ] Sandbox、控制面、能力网关和目标区网络隔离；
 - [ ] OTEL、告警、容量、备份和恢复演练完成。
 
