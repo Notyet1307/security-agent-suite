@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "manifest_role": "verified-deployment-metadata",
+  "runtime_platform": "linux/arm64",
+  "components": {
+    "agent_compose": {
+      "version": "v2609.1.0",
+      "repository_digest": "docker.io/chaitin/agent-compose@sha256:79eceaf444f0a59555d0871ce77e11dd4348fe49071b6026cd34faafcc429bfd"
+    },
+    "guest": {
+      "repository_digest": "docker.io/chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9"
+    },
+    "octobus": {
+      "repository_digest": "docker.io/chaitin/octobus@sha256:9961c9d80d7ba14001da7b96967980c85bec44ab846f87cc2a4e7ff55d9c280b"
+    }
+  },
+  "compose": {
+    "path": "agent-compose.yml",
+    "sha256": "sha256:ebd7ccf03426ac1bab63533c06e289042b1419c02fdab2e3b8a453d869d3e721",
+    "parser_version": "v2609.1.0"
+  }
+}

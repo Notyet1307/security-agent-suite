@@ -14,6 +14,7 @@
 - Mock executor for offline development and an agent-compose CLI adapter for real sandboxes.
 - Common Evidence, Finding, Timeline, AttackPath, RunResult, and Approval contracts.
 - OpenAPI, Docker, Kubernetes starter manifests, PostgreSQL target schema, CI, CodeQL, Dependabot, evaluation fixtures, roadmap, and issue backlog.
+- SAS-102 release contract in `release-manifest.json`: the checked-in `linux/arm64` source of truth and verified-deployment metadata pins agent-compose `v2609.1.0` at `docker.io/chaitin/agent-compose@sha256:79eceaf444f0a59555d0871ce77e11dd4348fe49071b6026cd34faafcc429bfd`, Guest at `docker.io/chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9`, and OctoBus at `docker.io/chaitin/octobus@sha256:9961c9d80d7ba14001da7b96967980c85bec44ab846f87cc2a4e7ff55d9c280b`. The raw `agent-compose.yml` SHA-256 is paired with parser version `v2609.1.0`, the authoritative compose validator when run; no upstream compose schema ID exists and this does not claim CI ran the parser. Doctor enforces agent-compose version and Guest release digest and checks the OctoBus status contract; the agent-compose/OctoBus RepoDigests remain operator-verified deployment inputs. Manifest normal/drift tests are checked in.
 
 ## Verification evidence
 
@@ -43,7 +44,7 @@ On the Mac mini target, the real controlled environment checks observed:
 - the operator-owned, repository-external `0600` injection used the OMP machine provider `baizhi-responses` (called `baizhiyun` by the user), endpoint `https://ai-api-gateway.app.baizhi.cloud/api/openai`, protocol `responses`, and model `gpt-5.6-sol`; the daemon, `sasd`, and Doctor loaded the same final Provider settings;
 - real `sasctl doctor` passed all 18 required checks, including Provider `/models` connectivity, and exited 0; the real `sasd` smoke returned `/healthz=200` and `/readyz=200`.
 
-The target evidence above used only the dedicated non-production synthetic probe and no customer data or model generation. The fixed CLI and container image digests are recorded for traceability, not as a completed SAS-102 release manifest.
+The target evidence above used only the dedicated non-production synthetic probe and no customer data or model generation. It does not claim real Agent execution, other runtime platforms, an OctoBus release version, or a production deployment.
 
 ## Deliberately not claimed
 
@@ -55,6 +56,6 @@ The target evidence above used only the dedicated non-production synthetic probe
 
 ## Next hard gate
 
-Complete **SAS-102** by pinning the agent-compose version, image digests, compose schema, and release manifest, then proceed to **SAS-103**. Do not start implementing the five domain agents against production data until the later gates cover their real execution behavior, structured output validation, cancellation, timeout, provenance, and capset isolation.
+Complete **SAS-103**: run the five Agents in real Sandboxes and establish the required smoke evidence. Do not start implementing the five domain agents against production data until the later gates cover their real execution behavior, structured output validation, cancellation, timeout, provenance, and capset isolation.
 
 See [`docs/roadmap/implementation-plan.md`](docs/roadmap/implementation-plan.md) and [`planning/backlog.tsv`](planning/backlog.tsv).
