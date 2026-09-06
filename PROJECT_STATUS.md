@@ -1,7 +1,7 @@
 # Project Status
 
 **Version:** `v0.1.0-alpha.1`  
-**Status date:** 2026-09-05
+**Status date:** 2026-09-06
 **Positioning:** runnable engineering baseline; not a production security-analysis product.
 
 ## Completed
@@ -17,7 +17,7 @@
 
 ## Verification evidence
 
-The following checks pass in the current worktree:
+The following offline checks pass in the current worktree:
 
 ```text
 make verify
@@ -26,23 +26,35 @@ make smoke
 git diff --check
 ```
 
-PyYAML is not installed, so `make verify` skipped YAML syntax parsing; its semantic checks still validated five agents, 15 skills, JSON contracts, and local links. The fixed `agent-compose v2609.1.0` binary normalized the current five-Agent compose shape to 8,964 bytes, and the current Doctor parser returned `compose_file=passed`; this validates the pinned CLI contract, not runtime capability.
+PyYAML is not installed, so `make verify` skipped YAML syntax parsing; its semantic checks still validated five agents, 15 skills, JSON contracts, and local links. The fixed `agent-compose v2609.1.0` binary normalized the current five-Agent compose shape to 8,964 bytes; its normalized output preserves the `${AGENT_COMPOSE_GUEST_IMAGE}` image reference, which Doctor now reconciles only against the already-validated source interpolation and configured digest.
 
 The smoke test proves two critical paths:
 
 1. A normal event-triage run reaches `succeeded` in Mock mode.
 2. An active attack-path-validation run stops at `waiting_approval` and executes only after server-side approval.
 
+On the Mac mini target, the real controlled environment checks observed:
+
+- agent-compose `v2609.1.0`, daemon `/api/version` and protocol status passed on `127.0.0.1:7410`; Docker image identity was `docker.io/chaitin/agent-compose@sha256:79eceaf444f0a59555d0871ce77e11dd4348fe49071b6026cd34faafcc429bfd`;
+- OctoBus `GET /admin/v1/status` returned `{"status":"ok","services":1}` on `127.0.0.1:19000`;
+- the running OctoBus container image identity was `docker.io/chaitin/octobus@sha256:9961c9d80d7ba14001da7b96967980c85bec44ab846f87cc2a4e7ff55d9c280b`; the endpoint status check did not infer a release version from that digest.
+- the configured Guest image was present by immutable digest `sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9`;
+- the dedicated retained probe Sandbox passed project-scoped binding, full-ID inspection, and the fixed synthetic `CalculatorService/Add(20,22)` proxy call returning `42`;
+- the operator-owned, repository-external `0600` injection used the OMP machine provider `baizhi-responses` (called `baizhiyun` by the user), endpoint `https://ai-api-gateway.app.baizhi.cloud/api/openai`, protocol `responses`, and model `gpt-5.6-sol`; the daemon, `sasd`, and Doctor loaded the same final Provider settings;
+- real `sasctl doctor` passed all 18 required checks, including Provider `/models` connectivity, and exited 0; the real `sasd` smoke returned `/healthz=200` and `/readyz=200`.
+
+The target evidence above used only the dedicated non-production synthetic probe and no customer data or model generation. The fixed CLI and container image digests are recorded for traceability, not as a completed SAS-102 release manifest.
+
 ## Deliberately not claimed
 
 - No real customer data source is connected.
 - No real security finding is produced by Mock mode.
-- Docker/OrbStack is available on the Mac mini. `agent-compose v2609.1.0` was temporarily source-built from exact commit `fee546bf137c56bb7473d3632b17ed14bdd3b54a`; its bare daemon `/api/version` and Doctor protocol checks passed, but agent-compose is not persistently deployed. OctoBus, Provider, Sandbox, and capability paths remain uncertified, so SAS-101 and target-environment readiness are not claimed green.
+- SAS-101 is complete, but it does not claim real execution capability for the five Agents or complete capset isolation; the running target containers are not a release deployment.
 - File storage is single-node development storage, not HA storage.
 - Kubernetes manifests are a production migration starting point, not a completed production deployment.
 
 ## Next hard gate
 
-Proceed with **M1: environment doctor and real agent-compose integration**. Do not start implementing the five domain agents against production data until all five minimal sandbox runs, structured output validation, cancellation, timeout, provenance, and capset isolation pass in the target environment.
+Complete **SAS-102** by pinning the agent-compose version, image digests, compose schema, and release manifest, then proceed to **SAS-103**. Do not start implementing the five domain agents against production data until the later gates cover their real execution behavior, structured output validation, cancellation, timeout, provenance, and capset isolation.
 
 See [`docs/roadmap/implementation-plan.md`](docs/roadmap/implementation-plan.md) and [`planning/backlog.tsv`](planning/backlog.tsv).

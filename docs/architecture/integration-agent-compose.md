@@ -70,13 +70,13 @@ CLI 适配器适合起步，但生产目标应是官方稳定 API：
 
 ## 6. Doctor 与 readiness
 
-Doctor 固定支持 agent-compose `v2609.1.0`：`agent-compose --json version` 必须返回完整且匹配的 build JSON；daemon 使用 `agent-compose --json --host <daemon> status`，严格校验 `/api/version` envelope。Doctor 的 compose 检查运行 `agent-compose --json --file <path> config`，只解析一个 normalized JSON object 并验证声明形状、Provider 声明和 Driver 适用性；不会以 `config --quiet` 的零退出作 complete fallback。每个 normalized agent 必须显式包含布尔值 `enabled`。当前 suite 的单镜像 readiness policy 要求每个 enabled agent 的 canonical `image` 非空，并与 trim 后的 `AGENT_COMPOSE_GUEST_IMAGE` 完全相等；`build` 不能替代 `image`。因此后续一次 Docker inspect 检查的正是运行声明使用的镜像。SAS-101 只拒绝无 tag、`:latest` 和畸形 digest；普通版本 tag 仍是可变引用，不能当作 SAS-102 的 immutable digest 验收。
+Doctor 固定支持 agent-compose `v2609.1.0`：`agent-compose --json version` 必须返回完整且匹配的 build JSON；daemon 使用 `agent-compose --json --host <daemon> status`，严格校验 `/api/version` envelope。Doctor 的 compose 检查运行 `agent-compose --json --file <path> config`，只解析一个 normalized JSON object 并验证声明形状、Provider 声明和 Driver 适用性；不会以 `config --quiet` 的零退出作 complete fallback。每个 normalized agent 必须显式包含布尔值 `enabled`。当前 suite 的单镜像 readiness policy 要求每个 enabled agent 的 canonical `image` 非空，并与 trim 后的 `AGENT_COMPOSE_GUEST_IMAGE` 完全一致；agent-compose v2609.1.0 对 image 字段保留 `${AGENT_COMPOSE_GUEST_IMAGE}` 引用时，Doctor 只在源 compose 插值已解析且该固定引用准确时将其等同于配置值，`build` 不能替代 `image`。因此后续一次 Docker inspect 检查的正是运行声明使用的镜像。SAS-101 只拒绝无 tag、`:latest` 和畸形 digest；普通版本 tag 仍是可变引用，不能当作 SAS-102 的 immutable digest 验收。
 
 Provider 检查通过只表示 enabled agent 存在非空 provider declaration，不表示 Provider 已真实配置或可连通；连通性由独立 required probe 判定，无法权威验证时保持 `unknown`。normalized 输出按 64 KiB 上限 fail-closed；当前五 Agent 配置实测 8,964 bytes（约 8.8 KiB）。
 
 人工预检仍可使用 `agent-compose -f <path> config --quiet`。但 `config` 可能解析 operator-owned compose 声明的外部 scheduler/script source，不能宣称零 I/O；Doctor 测试通过注入命令执行器保持离线。
 
-`/readyz` 不直接运行命令，而是读取后台缓存的 runtime-only doctor 结果。Mock 完成服务启动即 ready；`agentcompose-cli` 的任一 required 检查不是 `passed` 时返回结构化 503。固定版没有 capability CLI；在 Connect 编码及目标环境协议未确认前，OctoBus、Provider 和 Sandbox→proxy 保持 `unknown`，不得用 TCP 连通或离线 fixture 替代。
+`/readyz` 不直接运行命令，而是读取后台缓存的 runtime-only doctor 结果，并每 5 分钟刷新。Mock 完成服务启动即 ready；`agentcompose-cli` 的任一 required 检查不是 `passed` 时返回结构化 503。Doctor 对固定的 M1 probe project 使用 `--project-name sas101-doctor-probe sandbox ls` 做 project-scoped Sandbox 列表绑定，再用 inspect/exec 验证隔离 synthetic calculator 调用；不能用 TCP 连通或离线 fixture 替代。v2609.1.0 的 inspect JSON 会折叠重复 capset tag，完整 capset 隔离仍需 SAS-103 的独立验收。
 
 ## 7. 版本与升级
 

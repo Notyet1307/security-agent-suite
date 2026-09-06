@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+func TestReadinessRefreshInterval(t *testing.T) {
+	if readinessRefreshInterval != 5*time.Minute {
+		t.Fatalf("readiness refresh interval = %s", readinessRefreshInterval)
+	}
+}
+
 func TestMonitorReadinessRefreshesAndStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ticks := make(chan time.Time)

@@ -141,7 +141,7 @@ docker compose up --build
 agent-compose -f ./agent-compose.yml config --quiet
 ```
 
-这是人工预检。Doctor 内部改用 `agent-compose --json --file <path> config`，解析单个 normalized JSON object；它不把该命令称为零 I/O，因为 operator-owned compose 声明的外部 scheduler/script source 仍可能被解析。normalized Provider 检查只证明 enabled agent 存在非空声明，不表示真实配置或连通性；Provider 连通性、OctoBus 和 Sandbox→proxy 无法权威验证时仍保持 required `unknown`。当前 suite 采用单镜像 policy：每个 enabled agent 的 canonical `image` 必须与 `AGENT_COMPOSE_GUEST_IMAGE` 完全一致，`build` 不能替代。SAS-101 拒绝无 tag 和 `:latest`，但普通版本 tag 仍可变；SAS-102 才会要求 digest 和 release manifest。详细契约见 agent-compose 集成文档。
+这是人工预检。Doctor 内部改用 `agent-compose --json --file <path> config`，解析单个 normalized JSON object；它不把该命令称为零 I/O，因为 operator-owned compose 声明的外部 scheduler/script source 仍可能被解析。normalized Provider 检查只证明 enabled agent 存在非空声明，不表示真实配置或连通性；Provider 连通性、OctoBus 和 Sandbox→proxy 无法权威验证时仍保持 required `unknown`。当前 suite 采用单镜像 policy：每个 enabled agent 的 canonical `image` 必须与 `AGENT_COMPOSE_GUEST_IMAGE` 完全一致；v2609.1.0 的 normalized 输出若保留该固定环境引用，Doctor 仅在源 compose 插值已解析时接受它，`build` 不能替代 `image`。SAS-101 拒绝无 tag 和 `:latest`，但普通版本 tag 仍可变；SAS-102 才会要求 digest 和 release manifest。详细契约见 agent-compose 集成文档。
 
 ```bash
 agent-compose -f ./agent-compose.yml up

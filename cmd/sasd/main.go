@@ -31,6 +31,8 @@ var (
 	commit  = "none"
 )
 
+const readinessRefreshInterval = 5 * time.Minute
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -85,7 +87,7 @@ func main() {
 		doctorCfg.AgentComposeBin = cfg.AgentComposeBin
 		doctorCfg.AgentComposeFile = cfg.AgentComposeFile
 		doctorCfg.AgentComposeHost = cfg.AgentComposeHost
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(readinessRefreshInterval)
 		done := make(chan struct{})
 		readinessDone = done
 		go func() {
