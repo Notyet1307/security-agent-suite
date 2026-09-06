@@ -2,10 +2,13 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +31,7 @@ func testConfig(executor string) Config {
 		APIBaseURL: "http://api.test", APIKey: "secret-api-key", TenantID: "tenant-a",
 		Executor: executor, AgentComposeBin: "agent-compose", AgentComposeFile: "agent-compose.yml",
 		AgentComposeHost: "http://compose.test:7410", OctoBusHost: "http://octobus.test:7420",
-		DockerBin: "docker", GuestImage: "guest:v1",
+		OctoBusProxySandboxID: strings.Repeat("a", 64), DockerBin: "docker", GuestImage: "guest:v1",
 		Models:    map[string]string{"SAS_AGENT_MODEL": "provider/model", "SAS_REPORT_MODEL": "provider/report", "SAS_STRONG_AGENT_MODEL": "provider/strong"},
 		Providers: map[string]string{"SAS_PROVIDER": "pi"}, Timeout: time.Second,
 	}
@@ -101,7 +104,7 @@ func fakeDependencies(httpClient HTTPDoer, compose string) Dependencies {
 			return ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}, nil
 		},
 		DNSProbe:          func(context.Context, string) error { return nil },
-		OctoBusProxyProbe: func(context.Context, string, string) error { return nil },
+		OctoBusProxyProbe: func(context.Context, ProxyProbeConfig) error { return nil },
 	}
 }
 
@@ -158,7 +161,7 @@ func TestRunSkipsOptionalAgentComposeInMockMode(t *testing.T) {
 		return ComposeValidation{}, errors.New("must not validate")
 	}
 	deps.DNSProbe = func(context.Context, string) error { called = true; return errors.New("must not probe") }
-	deps.OctoBusProxyProbe = func(context.Context, string, string) error { called = true; return errors.New("must not probe") }
+	deps.OctoBusProxyProbe = func(context.Context, ProxyProbeConfig) error { called = true; return errors.New("must not probe") }
 	report := RunWithDependencies(context.Background(), testConfig("mock"), deps)
 	for _, name := range []string{"agent_compose_binary", "agent_compose_version", "compose_file", "docker", "model_settings", "guest_image", "provider_settings", "provider_connectivity", "agent_compose_host", "octobus_host"} {
 		check := checkByName(report, name)
@@ -208,7 +211,7 @@ func TestAgentComposeHostsAreRequired(t *testing.T) {
 	deps.AgentComposeProtocol = func(context.Context, string, string) error { called = true; return nil }
 	deps.OctoBusProtocol = func(context.Context, string) error { called = true; return nil }
 	deps.DNSProbe = func(context.Context, string) error { called = true; return nil }
-	deps.OctoBusProxyProbe = func(context.Context, string, string) error { called = true; return nil }
+	deps.OctoBusProxyProbe = func(context.Context, ProxyProbeConfig) error { called = true; return nil }
 	report = RunWithDependencies(context.Background(), cfg, deps)
 	for _, name := range []string{"agent_compose_host", "octobus_host"} {
 		if check := checkByName(report, name); !check.Required || check.Status != StatusFailed {
@@ -237,7 +240,7 @@ func TestMalformedAPIURLBlocksAllProbes(t *testing.T) {
 		return ComposeValidation{}, nil
 	}
 	deps.DNSProbe = func(context.Context, string) error { called = true; return nil }
-	deps.OctoBusProxyProbe = func(context.Context, string, string) error { called = true; return nil }
+	deps.OctoBusProxyProbe = func(context.Context, ProxyProbeConfig) error { called = true; return nil }
 	cfg := testConfig("agentcompose-cli")
 	cfg.APIBaseURL = "file:///private/secret"
 	report := RunWithDependencies(context.Background(), cfg, deps)
@@ -267,26 +270,31 @@ func TestRunRejectsUnsafeConfigurationWithoutProbes(t *testing.T) {
 	}
 }
 
-func TestUnverifiedIntegrationsRemainUnknown(t *testing.T) {
+func TestUnverifiedIntegrationsFailClosed(t *testing.T) {
 	deps := fakeDependencies(&fakeHTTP{}, composeFixture)
 	deps.OctoBusProtocol = nil
 	deps.ProviderProbe = nil
-	deps.OctoBusProxyProbe = nil
-	report := RunWithDependencies(context.Background(), testConfig("agentcompose-cli"), deps)
-	for _, name := range []string{"octobus_protocol", "provider_connectivity", "octobus_proxy"} {
-		if check := checkByName(report, name); !check.Required || check.Status != StatusUnknown {
-			t.Fatalf("%s=%+v", name, check)
-		}
+	cfg := testConfig("agentcompose-cli")
+	cfg.OctoBusProxySandboxID = ""
+	report := RunWithDependencies(context.Background(), cfg, deps)
+	if check := checkByName(report, "octobus_protocol"); !check.Required || check.Status != StatusFailed {
+		t.Fatalf("octobus_protocol=%+v", check)
+	}
+	if check := checkByName(report, "provider_connectivity"); !check.Required || check.Status != StatusFailed {
+		t.Fatalf("provider_connectivity=%+v", check)
+	}
+	if check := checkByName(report, "octobus_proxy"); !check.Required || check.Status != StatusUnknown {
+		t.Fatalf("octobus_proxy=%+v", check)
 	}
 	if report.ExitCode() == 0 {
 		t.Fatalf("unverified checks unexpectedly passed: %+v", report)
 	}
 	defaults := DefaultDependencies()
-	if defaults.AgentComposeProtocol == nil || defaults.DockerInspect == nil || defaults.DNSProbe == nil {
+	if defaults.AgentComposeProtocol == nil || defaults.DockerInspect == nil || defaults.DNSProbe == nil || defaults.OctoBusProtocol == nil || defaults.ProviderProbe == nil || defaults.OctoBusProxyProbe == nil {
 		t.Fatal("safe default dependencies are missing")
 	}
-	if defaults.OctoBusProtocol != nil || defaults.ProviderProbe != nil || defaults.OctoBusProxyProbe != nil || defaults.ValidateCompose != nil {
-		t.Fatal("default dependencies invented an unsupported active validation")
+	if defaults.ValidateCompose != nil {
+		t.Fatal("default dependencies bypassed normalized compose validation")
 	}
 }
 
@@ -319,6 +327,244 @@ func TestDefaultAdaptersUseInjectedRunCommand(t *testing.T) {
 		if calls[i] != want[i] {
 			t.Fatalf("calls[%d]=%q, want %q", i, calls[i], want[i])
 		}
+	}
+}
+
+func TestDefaultReadFileRejectsNonRegularAndOversizedFiles(t *testing.T) {
+	root := t.TempDir()
+	deps := DefaultDependencies()
+	if _, err := deps.ReadFile(root); err == nil {
+		t.Fatal("directory unexpectedly accepted as compose file")
+	}
+	path := filepath.Join(root, "compose.yml")
+	if err := os.WriteFile(path, []byte("name: test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := deps.ReadFile(path); err != nil || string(data) != "name: test\n" {
+		t.Fatalf("regular file read=(%q,%v)", data, err)
+	}
+	if err := os.WriteFile(path, make([]byte, maxComposeBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deps.ReadFile(path); err == nil {
+		t.Fatal("oversized compose file unexpectedly accepted")
+	}
+}
+
+func TestFromEnvironmentReadsOctoBusProxySandboxID(t *testing.T) {
+	want := strings.Repeat("b", 64)
+	t.Setenv("SAS_OCTOBUS_PROXY_SANDBOX_ID", want)
+	if got := FromEnvironment("http://api.test", "key", "tenant").OctoBusProxySandboxID; got != want {
+		t.Fatalf("proxy sandbox ID = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultOctoBusProxyProbeUsesFixedCLIContract(t *testing.T) {
+	const sandboxID = "02ca60835c72b7977d4f2c3320b53f690ad058f4a168f6cb72a62c54550733a1"
+	listJSON, inspectJSON, execJSON := validProxyProbeJSON(t, sandboxID)
+	var calls []string
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+"\x00"+strings.Join(args, "\x00"))
+		switch len(calls) {
+		case 1:
+			return listJSON, nil
+		case 2:
+			return inspectJSON, nil
+		default:
+			return execJSON, nil
+		}
+	}
+	cfg := ProxyProbeConfig{Binary: "/resolved/agent-compose", AgentComposeHost: "http://compose.test:7410", SandboxID: sandboxID, GuestImage: "guest:v1"}
+	if err := octoBusProxyProbe(run)(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/resolved/agent-compose\x00--json\x00--host\x00http://compose.test:7410\x00--project-name\x00" + proxyProbeProject + "\x00sandbox\x00ls",
+		"/resolved/agent-compose\x00--json\x00--host\x00http://compose.test:7410\x00--project-name\x00" + proxyProbeProject + "\x00inspect\x00sandbox\x00" + sandboxID,
+		"/resolved/agent-compose\x00--json\x00--host\x00http://compose.test:7410\x00--project-name\x00" + proxyProbeProject + "\x00exec\x00" + sandboxID + "\x00--command\x00" + proxyProbeCommand,
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("calls=%q", calls)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, calls[i], want[i])
+		}
+	}
+}
+
+func TestOctoBusProxyProbeReceivesResolvedBinaryInFullAndRuntimeRuns(t *testing.T) {
+	for _, runDoctor := range []struct {
+		name string
+		run  func(context.Context, Config, Dependencies) Report
+	}{
+		{name: "full", run: RunWithDependencies},
+		{name: "runtime", run: RunRuntimeWithDependencies},
+	} {
+		t.Run(runDoctor.name, func(t *testing.T) {
+			deps := fakeDependencies(&fakeHTTP{}, composeFixture)
+			got := ProxyProbeConfig{}
+			deps.OctoBusProxyProbe = func(_ context.Context, cfg ProxyProbeConfig) error { got = cfg; return nil }
+			report := runDoctor.run(context.Background(), testConfig("agentcompose-cli"), deps)
+			if check := checkByName(report, "octobus_proxy"); check.Status != StatusPassed || got.Binary != "/fake/agent-compose" || got.SandboxID == "" {
+				t.Fatalf("check=%+v probe config=%+v", check, got)
+			}
+		})
+	}
+}
+
+func validProxyProbeJSON(t *testing.T, sandboxID string) ([]byte, []byte, []byte) {
+	t.Helper()
+	project := json.RawMessage(`{"id":"project-id","name":"sas101-doctor-probe"}`)
+	list, err := json.Marshal(proxySandboxListOutput{Project: project, Sandboxes: []proxySandboxListItem{{SandboxID: sandboxID, Agent: "probe", Status: "running", Driver: "docker", Image: "guest:v1", StoppedRuntimeState: "retained"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspect, err := json.Marshal(proxySandboxOutput{SandboxID: sandboxID, Driver: "docker", VMStatus: "running", GuestImage: "guest:v1", Tags: map[string]string{"capset": "dev"}, StoppedRuntimeState: "retained"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitCode, success := int32(0), true
+	response := `{"result":42,"serviceId":"sas101-calculator","instanceId":"calculator-test","label":"sas101"}`
+	execResult, err := json.Marshal(proxyExecOutput{ExecID: "exec-id", SandboxID: sandboxID, Command: "bash", Args: []string{"-lc", proxyProbeCommand}, ExitCode: &exitCode, Success: &success, Stdout: response, Output: response})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list, inspect, execResult
+}
+
+func TestOctoBusProtocolUsesInjectedHTTPClient(t *testing.T) {
+	var got *http.Request
+	client := httpDoerFunc(func(req *http.Request) (*http.Response, error) {
+		got = req
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"status":"ok","services":0}`)), Request: req}, nil
+	})
+	deps := fillDefaults(Dependencies{HTTPClient: client})
+	if err := deps.OctoBusProtocol(context.Background(), "http://octobus.test:19000/"); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Method != http.MethodGet || got.URL.String() != "http://octobus.test:19000/admin/v1/status" {
+		t.Fatalf("request=%v", got)
+	}
+	if got.Header.Get("Authorization") != "" {
+		t.Fatalf("unexpected authorization header: %q", got.Header.Get("Authorization"))
+	}
+}
+
+func TestProviderProbeUsesInjectedHTTPClient(t *testing.T) {
+	var got *http.Request
+	client := httpDoerFunc(func(req *http.Request) (*http.Response, error) {
+		got = req
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt-5.6-terra"}]}`)), Request: req}, nil
+	})
+	probe := providerProbeHTTP(client)
+	settings := map[string]string{
+		"LLM_API_ENDPOINT": "https://provider.test/v1",
+		"LLM_API_PROTOCOL": "responses",
+		"LLM_API_KEY":      "test-key",
+		"LLM_MODEL":        "default/gpt-5.6-terra",
+	}
+	if err := probe(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Method != http.MethodGet || got.URL.String() != "https://provider.test/v1/models" {
+		t.Fatalf("request=%v", got)
+	}
+	if got.Header.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("authorization=%q", got.Header.Get("Authorization"))
+	}
+}
+
+func TestProviderProbeRejectsUnsupportedOrMissingConfiguration(t *testing.T) {
+	probe := providerProbeHTTP(httpDoerFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatal("provider request should not be made")
+		return nil, nil
+	}))
+	for _, settings := range []map[string]string{
+		{},
+		{"LLM_API_ENDPOINT": "https://provider.test", "LLM_API_PROTOCOL": "unknown", "LLM_API_KEY": "key", "LLM_MODEL": "model"},
+	} {
+		if err := probe(context.Background(), settings); err == nil {
+			t.Fatal("invalid provider configuration unexpectedly passed")
+		}
+	}
+}
+
+func TestProviderProbeNormalizesEndpointsAndMatchesAllConfiguredModels(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		path     string
+	}{
+		{name: "root", endpoint: "https://provider.test", path: "/v1/models"},
+		{name: "v1", endpoint: "https://provider.test/v1", path: "/v1/models"},
+		{name: "responses", endpoint: "https://provider.test/v1/responses", path: "/v1/models"},
+		{name: "chat completions", endpoint: "https://provider.test/v1/chat/completions", path: "/v1/models"},
+		{name: "openai", endpoint: "https://provider.test/openai", path: "/openai/v1/models"},
+		{name: "custom prefix", endpoint: "https://provider.test/proxy/v1/responses", path: "/proxy/v1/models"},
+		{name: "loopback HTTP", endpoint: "http://127.0.0.1:8080/v1", path: "/v1/models"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got *http.Request
+			client := httpDoerFunc(func(req *http.Request) (*http.Response, error) {
+				got = req
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt"},{"id":"agent"},{"id":"report"},{"id":"strong"}]}`)),
+				}, nil
+			})
+			settings := map[string]string{
+				"LLM_API_ENDPOINT":       tt.endpoint,
+				"LLM_API_PROTOCOL":       "responses",
+				"LLM_API_KEY":            "key",
+				"LLM_MODEL":              "default/gpt",
+				"SAS_AGENT_MODEL":        "pi/agent",
+				"SAS_REPORT_MODEL":       "report",
+				"SAS_STRONG_AGENT_MODEL": "provider/strong",
+			}
+			if err := providerProbeHTTP(client)(context.Background(), settings); err != nil {
+				t.Fatal(err)
+			}
+			if got == nil || got.URL.Path != tt.path || got.Header.Get("Authorization") != "Bearer key" {
+				t.Fatalf("request=%v", got)
+			}
+		})
+	}
+}
+
+func TestProviderProbeRejectsRemoteHTTPRedirectAndNilResponses(t *testing.T) {
+	settings := map[string]string{
+		"LLM_API_ENDPOINT": "http://provider.test/v1",
+		"LLM_API_PROTOCOL": "responses",
+		"LLM_API_KEY":      "key",
+		"LLM_MODEL":        "model",
+	}
+	calls := 0
+	if err := providerProbeHTTP(httpDoerFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, nil
+	}))(context.Background(), settings); err == nil || calls != 0 {
+		t.Fatalf("remote HTTP result=%v calls=%d", err, calls)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		response *http.Response
+	}{
+		{name: "redirect", response: &http.Response{StatusCode: http.StatusFound, Body: io.NopCloser(strings.NewReader("redirect"))}},
+		{name: "nil body", response: &http.Response{StatusCode: http.StatusOK}},
+		{name: "nil response", response: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings["LLM_API_ENDPOINT"] = "https://provider.test/v1"
+			err := providerProbeHTTP(httpDoerFunc(func(*http.Request) (*http.Response, error) {
+				return tc.response, nil
+			}))(context.Background(), settings)
+			if err == nil {
+				t.Fatal("unhealthy provider response unexpectedly passed")
+			}
+		})
 	}
 }
 
@@ -498,6 +744,25 @@ func TestDefaultComposeValidationDeterminesDockerApplicability(t *testing.T) {
 	}
 }
 
+func TestNormalizedImageMatchesConfiguredGuestImage(t *testing.T) {
+	for _, tc := range []struct {
+		name, normalized, expected string
+		want                       bool
+	}{
+		{name: "literal", normalized: "guest:v1", expected: "guest:v1", want: true},
+		{name: "upstream interpolation reference", normalized: "${AGENT_COMPOSE_GUEST_IMAGE}", expected: "guest:v1", want: true},
+		{name: "different literal", normalized: "other:v1", expected: "guest:v1"},
+		{name: "different interpolation reference", normalized: "${OTHER_IMAGE}", expected: "guest:v1"},
+		{name: "missing expected", normalized: "guest:v1", expected: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizedImageMatchesConfigured(tc.normalized, tc.expected); got != tc.want {
+				t.Fatalf("normalizedImageMatchesConfigured(%q,%q)=%v, want %v", tc.normalized, tc.expected, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseNormalizedCompose(t *testing.T) {
 	valid := normalizedComposeFixture
 	tests := []struct {
@@ -507,7 +772,7 @@ func TestParseNormalizedCompose(t *testing.T) {
 		fail bool
 	}{
 		{name: "valid", data: valid, want: ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}},
-		{name: "explicit false disabled", data: `{"name":"test","agents":[{"name":"off","enabled":false,"driver":{"name":"boxlite","boxlite":{}}},{"name":"demo","enabled":true,"provider":"pi","image":"guest:v1","driver":{"name":"docker","docker":{}}}]}`, want: ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}},
+		{name: "upstream image interpolation reference", data: strings.Replace(valid, `"image":"guest:v1"`, `"image":"${AGENT_COMPOSE_GUEST_IMAGE}"`, 1), want: ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}},
 		{name: "future fields ignored", data: `{"name":"test","future":true,"agents":[{"name":"demo","enabled":true,"provider":"pi","image":"guest:v1","future":{},"driver":{"name":"docker","docker":{},"future":true}}]}`, want: ComposeValidation{Complete: true, ProviderConfigured: true, UsesDocker: true}},
 		{name: "missing provider", data: strings.Replace(valid, `"provider":"pi",`, "", 1), want: ComposeValidation{Complete: true, UsesDocker: true}},
 		{name: "empty", data: "", fail: true},
@@ -755,7 +1020,7 @@ func TestCanceledSuccessfulCallbacksAreUnknown(t *testing.T) {
 
 	t.Run("proxy", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		status, _ := probeProxy(ctx, time.Second, "http://compose.test", "http://octobus.test", func(context.Context, string, string) error {
+		status, _ := probeProxy(ctx, time.Second, ProxyProbeConfig{}, func(context.Context, ProxyProbeConfig) error {
 			cancel()
 			return nil
 		})
@@ -827,7 +1092,7 @@ func TestCanceledContextSkipsExternalCallbacks(t *testing.T) {
 		return ComposeValidation{Complete: true}, nil
 	}
 	deps.DNSProbe = func(context.Context, string) error { called = true; return nil }
-	deps.OctoBusProxyProbe = func(context.Context, string, string) error { called = true; return nil }
+	deps.OctoBusProxyProbe = func(context.Context, ProxyProbeConfig) error { called = true; return nil }
 	report := RunWithDependencies(ctx, testConfig("agentcompose-cli"), deps)
 	if called || report.ExitCode() == 0 {
 		t.Fatalf("called=%v report=%+v", called, report)

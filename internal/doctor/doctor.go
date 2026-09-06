@@ -69,19 +69,24 @@ func (r Report) WriteJSON(w io.Writer) error {
 }
 
 type Config struct {
-	APIBaseURL       string
-	APIKey           string
-	TenantID         string
-	Executor         string
-	AgentComposeBin  string
-	AgentComposeFile string
-	AgentComposeHost string
-	DockerBin        string
-	OctoBusHost      string
-	GuestImage       string
-	Models           map[string]string
-	Providers        map[string]string
-	Timeout          time.Duration
+	APIBaseURL            string
+	APIKey                string
+	TenantID              string
+	Executor              string
+	AgentComposeBin       string
+	AgentComposeFile      string
+	AgentComposeHost      string
+	DockerBin             string
+	OctoBusHost           string
+	GuestImage            string
+	OctoBusProxySandboxID string
+	LLMAPIEndpoint        string
+	LLMAPIProtocol        string
+	LLMAPIKey             string
+	LLMModel              string
+	Models                map[string]string
+	Providers             map[string]string
+	Timeout               time.Duration
 }
 
 const (
@@ -90,6 +95,8 @@ const (
 	maxComposeBytes       = 1 << 20
 	maxCommandOutputBytes = 64 << 10
 	agentComposeVersion   = "v2609.1.0"
+	proxyProbeCommand     = `grpcurl -plaintext -H "x-capability-sandbox-token: $CAP_TOKEN" -H "x-octobus-capset: dev" -H "x-octobus-instance: calculator-test" -d '{"left":20,"right":22}' "$CAP_GRPC_TARGET" calculator.v1.CalculatorService/Add`
+	proxyProbeProject     = "sas101-doctor-probe"
 )
 
 func FromEnvironment(baseURL, apiKey, tenantID string) Config {
@@ -110,13 +117,18 @@ func FromEnvironment(baseURL, apiKey, tenantID string) Config {
 	}
 	return Config{
 		APIBaseURL: baseURL, APIKey: apiKey, TenantID: tenantID,
-		Executor:         envOr("SAS_EXECUTOR", "mock"),
-		AgentComposeBin:  envOr("SAS_AGENT_COMPOSE_BIN", "agent-compose"),
-		AgentComposeFile: envOr("SAS_AGENT_COMPOSE_FILE", "./agent-compose.yml"),
-		AgentComposeHost: strings.TrimSpace(os.Getenv("SAS_AGENT_COMPOSE_HOST")),
-		DockerBin:        envOr("SAS_DOCKER_BIN", "docker"),
-		OctoBusHost:      firstEnv("SAS_OCTOBUS_HOST", "SAS_OCTOBUS_URL", "OCTOBUS_HOST", "OCTOBUS_URL", "AGENT_COMPOSE_OCTOBUS_HOST"),
-		GuestImage:       strings.TrimSpace(os.Getenv("AGENT_COMPOSE_GUEST_IMAGE")),
+		Executor:              envOr("SAS_EXECUTOR", "mock"),
+		AgentComposeBin:       envOr("SAS_AGENT_COMPOSE_BIN", "agent-compose"),
+		AgentComposeFile:      envOr("SAS_AGENT_COMPOSE_FILE", "./agent-compose.yml"),
+		AgentComposeHost:      strings.TrimSpace(os.Getenv("SAS_AGENT_COMPOSE_HOST")),
+		DockerBin:             envOr("SAS_DOCKER_BIN", "docker"),
+		OctoBusHost:           firstEnv("SAS_OCTOBUS_HOST", "SAS_OCTOBUS_URL", "OCTOBUS_HOST", "OCTOBUS_URL", "AGENT_COMPOSE_OCTOBUS_HOST"),
+		GuestImage:            strings.TrimSpace(os.Getenv("AGENT_COMPOSE_GUEST_IMAGE")),
+		OctoBusProxySandboxID: strings.TrimSpace(os.Getenv("SAS_OCTOBUS_PROXY_SANDBOX_ID")),
+		LLMAPIEndpoint:        strings.TrimSpace(os.Getenv("LLM_API_ENDPOINT")),
+		LLMAPIProtocol:        strings.TrimSpace(os.Getenv("LLM_API_PROTOCOL")),
+		LLMAPIKey:             firstEnv("LLM_API_KEY", "OPENAI_API_KEY"),
+		LLMModel:              strings.TrimSpace(os.Getenv("LLM_MODEL")),
 		Models: map[string]string{
 			"SAS_AGENT_MODEL":        strings.TrimSpace(os.Getenv("SAS_AGENT_MODEL")),
 			"SAS_REPORT_MODEL":       strings.TrimSpace(os.Getenv("SAS_REPORT_MODEL")),
@@ -126,10 +138,139 @@ func FromEnvironment(baseURL, apiKey, tenantID string) Config {
 	}
 }
 
+func providerProbeSettings(cfg Config) map[string]string {
+	return map[string]string{
+		"LLM_API_ENDPOINT":       cfg.LLMAPIEndpoint,
+		"LLM_API_PROTOCOL":       cfg.LLMAPIProtocol,
+		"LLM_API_KEY":            cfg.LLMAPIKey,
+		"LLM_MODEL":              cfg.LLMModel,
+		"SAS_AGENT_MODEL":        cfg.Models["SAS_AGENT_MODEL"],
+		"SAS_REPORT_MODEL":       cfg.Models["SAS_REPORT_MODEL"],
+		"SAS_STRONG_AGENT_MODEL": cfg.Models["SAS_STRONG_AGENT_MODEL"],
+	}
+}
+
+type providerModelsResponse struct {
+	Data *[]struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+func providerProbeHTTP(client HTTPDoer) func(context.Context, map[string]string) error {
+	return func(ctx context.Context, settings map[string]string) error {
+		endpoint := strings.TrimSpace(settings["LLM_API_ENDPOINT"])
+		protocol := strings.TrimSpace(settings["LLM_API_PROTOCOL"])
+		key := strings.TrimSpace(settings["LLM_API_KEY"])
+		model := strings.TrimSpace(settings["LLM_MODEL"])
+		if endpoint == "" || key == "" || model == "" {
+			return errors.New("provider configuration is incomplete")
+		}
+		if protocol != "responses" && protocol != "chat_completions" {
+			return errors.New("provider protocol is unsupported")
+		}
+		u, err := parseURL(endpoint, true)
+		if err != nil {
+			return errors.New("provider endpoint is invalid")
+		}
+		if !providerEndpointAllowed(u) {
+			return errors.New("provider endpoint must use HTTPS unless it is loopback")
+		}
+		u.Path = providerModelsPath(u.Path)
+		u.RawPath = ""
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return errors.New("could not create provider models request")
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := client.Do(req)
+		if err != nil {
+			return errors.New("provider models request failed")
+		}
+		if resp == nil || resp.Body == nil {
+			return errors.New("provider models response was unhealthy")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return errors.New("provider models response was unhealthy")
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxOctoBusStatusBodyBytes))
+		if err != nil || len(body) >= maxOctoBusStatusBodyBytes {
+			return errors.New("provider models response was invalid")
+		}
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		var response providerModelsResponse
+		if err := decoder.Decode(&response); err != nil {
+			return errors.New("provider models response was invalid")
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF || response.Data == nil {
+			return errors.New("provider models response was invalid")
+		}
+		wanted := []string{model, strings.TrimSpace(settings["SAS_AGENT_MODEL"]), strings.TrimSpace(settings["SAS_REPORT_MODEL"]), strings.TrimSpace(settings["SAS_STRONG_AGENT_MODEL"])}
+		available := make(map[string]struct{}, len(*response.Data))
+		for _, item := range *response.Data {
+			available[item.ID] = struct{}{}
+		}
+		for _, configured := range wanted {
+			if configured == "" {
+				continue
+			}
+			matched := false
+			for _, candidate := range providerModelCandidates(configured) {
+				if _, ok := available[candidate]; ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return errors.New("configured provider model was not found")
+			}
+		}
+		return nil
+	}
+}
+
+func providerModelCandidates(configured string) []string {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return nil
+	}
+	candidates := []string{configured}
+	if slash := strings.IndexByte(configured, '/'); slash >= 0 && slash+1 < len(configured) {
+		candidates = append(candidates, configured[slash+1:])
+	}
+	return candidates
+}
+
+func providerEndpointAllowed(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	if u.Scheme == "https" {
+		return true
+	}
+	if u.Scheme != "http" {
+		return false
+	}
+	host := strings.TrimSpace(strings.ToLower(u.Hostname()))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 type ComposeValidation struct {
 	Complete           bool
 	ProviderConfigured bool
 	UsesDocker         bool
+}
+
+type ProxyProbeConfig struct {
+	Binary           string
+	AgentComposeHost string
+	SandboxID        string
+	GuestImage       string
 }
 
 type Dependencies struct {
@@ -145,7 +286,7 @@ type Dependencies struct {
 	DockerInspect        func(context.Context, string, string) error
 	ValidateCompose      func(context.Context, string, string) (ComposeValidation, error)
 	DNSProbe             func(context.Context, string) error
-	OctoBusProxyProbe    func(context.Context, string, string) error
+	OctoBusProxyProbe    func(context.Context, ProxyProbeConfig) error
 }
 
 type HTTPDoer interface {
@@ -214,6 +355,8 @@ func run(ctx context.Context, cfg Config, deps Dependencies, includeAPI bool) Re
 		addIntegration(add, cfg.Executor == "agentcompose-cli", StatusUnknown, "integration checks could not be verified because configuration is invalid")
 	case cfg.Executor == "mock":
 		addIntegration(add, false, StatusSkipped, "integration is optional in mock executor mode")
+	case cfg.Executor == "agentcompose-cli" && ctx.Err() != nil:
+		addIntegration(add, true, StatusUnknown, "integration checks could not be verified because the doctor context was canceled")
 	case cfg.Executor == "agentcompose-cli":
 		composeData, composeErr := inspectCompose(cfg.AgentComposeFile, deps.ReadFile)
 		binary, binaryErr = findBinary(cfg.AgentComposeBin, deps.LookPath)
@@ -245,7 +388,7 @@ func run(ctx context.Context, cfg Config, deps Dependencies, includeAPI bool) Re
 		status, message = checkProviders(cfg.Providers, composeComplete, composeComplete && validation.ProviderConfigured)
 		add("provider_settings", true, status, message)
 		if composeComplete && status == StatusPassed {
-			status, message = probeProvider(ctx, cfg.Timeout, deps.ProviderProbe, cfg.Providers)
+			status, message = probeProvider(ctx, cfg.Timeout, deps.ProviderProbe, providerProbeSettings(cfg))
 			add("provider_connectivity", true, status, message)
 		} else {
 			add("provider_connectivity", true, StatusUnknown, "provider connectivity could not be verified")
@@ -297,10 +440,18 @@ func run(ctx context.Context, cfg Config, deps Dependencies, includeAPI bool) Re
 		}
 		addProtocolCheck(add, "agent_compose_protocol", "agent-compose", cfg.AgentComposeHost, configOK, agentComposeProtocol, cfg.Timeout, ctx)
 		addProtocolCheck(add, "octobus_protocol", "OctoBus", cfg.OctoBusHost, configOK, deps.OctoBusProtocol, cfg.Timeout, ctx)
-		if deps.OctoBusProxyProbe == nil || !configOK || !validHost(cfg.AgentComposeHost) || !validHost(cfg.OctoBusHost) {
-			add("octobus_proxy", true, StatusUnknown, "Sandbox to OctoBus proxy could not be verified")
-		} else {
-			status, message := probeProxy(ctx, cfg.Timeout, cfg.AgentComposeHost, cfg.OctoBusHost, deps.OctoBusProxyProbe)
+		switch {
+		case cfg.OctoBusProxySandboxID == "":
+			add("octobus_proxy", true, StatusUnknown, "live Sandbox to OctoBus proxy could not be verified because the probe sandbox is not configured")
+		case !validSandboxID(cfg.OctoBusProxySandboxID):
+			add("octobus_proxy", true, StatusFailed, "live Sandbox to OctoBus proxy probe sandbox ID is invalid")
+		case deps.OctoBusProxyProbe == nil || !configOK || binaryErr != nil || binary == "" || !validHost(cfg.AgentComposeHost):
+			add("octobus_proxy", true, StatusUnknown, "live Sandbox to OctoBus proxy could not be verified")
+		default:
+			status, message := probeProxy(ctx, cfg.Timeout, ProxyProbeConfig{
+				Binary: binary, AgentComposeHost: cfg.AgentComposeHost,
+				SandboxID: cfg.OctoBusProxySandboxID, GuestImage: cfg.GuestImage,
+			}, deps.OctoBusProxyProbe)
 			add("octobus_proxy", true, status, message)
 		}
 		if deps.DNSProbe == nil || !configOK {
@@ -368,6 +519,12 @@ func fillDefaults(deps Dependencies) Dependencies {
 			return validateAgentComposeDaemon(ctx, binary, host, run)
 		}
 	}
+	if deps.OctoBusProtocol == nil {
+		deps.OctoBusProtocol = octoBusProtocol(deps.HTTPClient)
+	}
+	if deps.ProviderProbe == nil {
+		deps.ProviderProbe = providerProbeHTTP(deps.HTTPClient)
+	}
 	if deps.DockerInspect == nil {
 		run := deps.RunCommand
 		deps.DockerInspect = func(ctx context.Context, binary, image string) error {
@@ -377,20 +534,39 @@ func fillDefaults(deps Dependencies) Dependencies {
 	if deps.DNSProbe == nil {
 		deps.DNSProbe = d.DNSProbe
 	}
+	if deps.OctoBusProxyProbe == nil {
+		deps.OctoBusProxyProbe = octoBusProxyProbe(deps.RunCommand)
+	}
 	return deps
+}
+
+func octoBusProtocol(client HTTPDoer) func(context.Context, string) error {
+	return func(ctx context.Context, host string) error {
+		return probeOctoBusStatus(ctx, host, client)
+	}
 }
 
 func DefaultDependencies() Dependencies {
 	run := runCommand
+	httpClient := &http.Client{
+		Timeout: defaultTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	return Dependencies{
-		HTTPClient:  &http.Client{Timeout: defaultTimeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }},
-		LookPath:    exec.LookPath,
-		RunCommand:  run,
-		ReadFile:    readFile,
-		DialContext: (&net.Dialer{Timeout: defaultTimeout}).DialContext,
+		HTTPClient: httpClient,
+		LookPath:   exec.LookPath,
+		RunCommand: run,
+		ReadFile:   readFile,
+		DialContext: (&net.Dialer{
+			Timeout: defaultTimeout,
+		}).DialContext,
 		AgentComposeProtocol: func(ctx context.Context, binary, host string) error {
 			return validateAgentComposeDaemon(ctx, binary, host, run)
 		},
+		OctoBusProtocol: octoBusProtocol(httpClient),
+		ProviderProbe:   providerProbeHTTP(httpClient),
 		DockerInspect: func(ctx context.Context, binary, image string) error {
 			return inspectDockerImage(ctx, binary, image, run)
 		},
@@ -398,6 +574,7 @@ func DefaultDependencies() Dependencies {
 			_, err := net.DefaultResolver.LookupHost(ctx, host)
 			return err
 		},
+		OctoBusProxyProbe: octoBusProxyProbe(run),
 	}
 }
 
@@ -408,10 +585,13 @@ func validateRuntimeConfig(cfg Config) error {
 	if unsafeCommand(cfg.AgentComposeBin) || unsafeCommand(cfg.DockerBin) {
 		return errors.New("unsafe command")
 	}
-	for _, value := range []string{cfg.APIKey, cfg.TenantID, cfg.AgentComposeFile, cfg.AgentComposeHost, cfg.OctoBusHost, cfg.GuestImage} {
+	for _, value := range []string{cfg.APIKey, cfg.TenantID, cfg.AgentComposeFile, cfg.AgentComposeHost, cfg.OctoBusHost, cfg.GuestImage, cfg.LLMAPIEndpoint, cfg.LLMAPIProtocol, cfg.LLMAPIKey, cfg.LLMModel} {
 		if unsafeText(value) {
 			return errors.New("unsafe text")
 		}
+	}
+	if cfg.Executor == "agentcompose-cli" && cfg.OctoBusProxySandboxID != "" && !validSandboxID(cfg.OctoBusProxySandboxID) {
+		return errors.New("invalid OctoBus proxy sandbox ID")
 	}
 	for key, value := range cfg.Models {
 		if unsafeText(key) || unsafeText(value) {
@@ -436,6 +616,18 @@ func unsafeText(value string) bool {
 		}
 	}
 	return false
+}
+
+func validSandboxID(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func unsafeCommand(value string) bool {
@@ -582,6 +774,102 @@ func validateAgentComposeDaemon(ctx context.Context, binary, host string, run fu
 	return nil
 }
 
+const maxOctoBusStatusBodyBytes = 64 << 10
+
+type octoBusStatus struct {
+	Status   string `json:"status"`
+	Services *int   `json:"services"`
+}
+
+func probeOctoBusStatus(ctx context.Context, host string, client HTTPDoer) error {
+	u, err := parseURL(host, false)
+	if err != nil || (u.Path != "" && u.Path != "/") {
+		return errors.New("invalid OctoBus host")
+	}
+	u.Path = "/admin/v1/status"
+	u.RawPath = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return errors.New("could not create OctoBus status request")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.New("OctoBus status request failed")
+	}
+	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusOK {
+		return errors.New("OctoBus status response was unhealthy")
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxOctoBusStatusBodyBytes))
+	if err != nil || len(body) >= maxOctoBusStatusBodyBytes {
+		return errors.New("OctoBus status response was invalid")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	token, err := decoder.Token()
+	delimiter, ok := token.(json.Delim)
+	if err != nil || !ok || delimiter != '{' {
+		return errors.New("OctoBus status response was invalid")
+	}
+	var status octoBusStatus
+	seen := make(map[string]bool, 2)
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok || seen[key] {
+			return errors.New("OctoBus status response was invalid")
+		}
+		seen[key] = true
+		switch key {
+		case "status":
+			if err := decoder.Decode(&status.Status); err != nil {
+				return errors.New("OctoBus status response was invalid")
+			}
+		case "services":
+			var services int
+			if err := decoder.Decode(&services); err != nil {
+				return errors.New("OctoBus status response was invalid")
+			}
+			status.Services = &services
+		default:
+			return errors.New("OctoBus status response was invalid")
+		}
+	}
+
+	token, err = decoder.Token()
+	delimiter, ok = token.(json.Delim)
+	if err != nil || !ok || delimiter != '}' {
+		return errors.New("OctoBus status response was invalid")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("OctoBus status response was invalid")
+	}
+	if status.Status != "ok" || status.Services == nil || *status.Services < 0 {
+		return errors.New("OctoBus status response was unhealthy")
+	}
+	return nil
+}
+
+func providerModelsPath(path string) string {
+	path = strings.TrimRight(path, "/")
+	for _, suffix := range []string{"/responses", "/chat/completions"} {
+		if strings.HasSuffix(path, suffix) {
+			path = strings.TrimSuffix(path, suffix)
+			break
+		}
+	}
+	switch {
+	case path == "", path == "/":
+		return "/v1/models"
+	case path == "/v1":
+		return "/v1/models"
+	case strings.HasSuffix(path, "/openai"):
+		return path + "/v1/models"
+	default:
+		return path + "/models"
+	}
+}
+
 type normalizedComposeProbe struct {
 	Name   string                 `json:"name"`
 	Agents []normalizedAgentProbe `json:"agents"`
@@ -659,7 +947,7 @@ func parseNormalizedCompose(data []byte, expectedGuestImage string) (ComposeVali
 		if strings.TrimSpace(agent.Provider) == "" {
 			validation.ProviderConfigured = false
 		}
-		if agent.Image == "" || agent.Image != expectedImage {
+		if !normalizedImageMatchesConfigured(agent.Image, expectedImage) {
 			return ComposeValidation{}, errors.New("enabled normalized compose agent image does not match configured guest image")
 		}
 		if agent.Driver.Name == "docker" {
@@ -724,6 +1012,12 @@ func jsonObject(raw json.RawMessage) bool {
 		return false
 	}
 	return object != nil
+}
+
+func normalizedImageMatchesConfigured(normalized, expected string) bool {
+	normalized = strings.TrimSpace(normalized)
+	expected = strings.TrimSpace(expected)
+	return expected != "" && (normalized == expected || normalized == "${AGENT_COMPOSE_GUEST_IMAGE}")
 }
 
 func jsonAbsentOrNull(raw json.RawMessage) bool {
@@ -806,6 +1100,153 @@ func decodeStrictJSON(data []byte, target any) error {
 		return errors.New("multiple JSON values")
 	}
 	return nil
+}
+
+type proxySandboxOutput struct {
+	SandboxID                string                           `json:"sandbox_id"`
+	SandboxShortID           string                           `json:"sandbox_short_id,omitempty"`
+	Title                    string                           `json:"title,omitempty"`
+	Driver                   string                           `json:"driver,omitempty"`
+	VMStatus                 string                           `json:"vm_status,omitempty"`
+	WorkspacePath            string                           `json:"workspace_path,omitempty"`
+	ProxyPath                string                           `json:"proxy_path,omitempty"`
+	GuestImage               string                           `json:"guest_image,omitempty"`
+	TriggerSource            string                           `json:"trigger_source,omitempty"`
+	CreatedAt                string                           `json:"created_at,omitempty"`
+	UpdatedAt                string                           `json:"updated_at,omitempty"`
+	CellCount                uint32                           `json:"cell_count"`
+	EventCount               uint32                           `json:"event_count"`
+	Tags                     map[string]string                `json:"tags,omitempty"`
+	WorkspaceReclamation     *proxyWorkspaceReclamationOutput `json:"workspace_reclamation,omitempty"`
+	StoppedRuntimePolicy     string                           `json:"stopped_runtime_policy"`
+	StoppedRuntimeState      string                           `json:"stopped_runtime_state"`
+	StoppedRuntimeError      string                           `json:"stopped_runtime_last_error,omitempty"`
+	StoppedRuntimeReleasedAt string                           `json:"stopped_runtime_released_at,omitempty"`
+}
+
+type proxyWorkspaceReclamationOutput struct {
+	State       string `json:"state"`
+	StartedAt   string `json:"started_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	LastError   string `json:"last_error,omitempty"`
+}
+
+type proxyExecOutput struct {
+	ExecID    string   `json:"exec_id"`
+	SandboxID string   `json:"sandbox_id"`
+	RunID     string   `json:"run_id,omitempty"`
+	Command   string   `json:"command"`
+	Args      []string `json:"args,omitempty"`
+	Cwd       string   `json:"cwd,omitempty"`
+	ExitCode  *int32   `json:"exit_code"`
+	Success   *bool    `json:"success"`
+	Stdout    string   `json:"stdout,omitempty"`
+	Stderr    string   `json:"stderr,omitempty"`
+	Output    string   `json:"output,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+type proxyCalculatorResponse struct {
+	Result     *float64 `json:"result"`
+	ServiceID  string   `json:"serviceId"`
+	InstanceID string   `json:"instanceId"`
+	Label      string   `json:"label"`
+}
+
+type proxySandboxListOutput struct {
+	Project   json.RawMessage        `json:"project"`
+	Sandboxes []proxySandboxListItem `json:"sandboxes"`
+}
+
+type proxySandboxListItem struct {
+	SandboxID            string `json:"sandbox_id"`
+	SandboxShortID       string `json:"sandbox_short_id"`
+	Agent                string `json:"agent"`
+	Status               string `json:"status"`
+	RunID                string `json:"run_id,omitempty"`
+	RunShortID           string `json:"run_short_id,omitempty"`
+	CreatedAt            string `json:"created_at,omitempty"`
+	UpdatedAt            string `json:"updated_at,omitempty"`
+	Driver               string `json:"driver,omitempty"`
+	Image                string `json:"image,omitempty"`
+	Workspace            string `json:"workspace,omitempty"`
+	StoppedRuntimePolicy string `json:"stopped_runtime_policy,omitempty"`
+	StoppedRuntimeState  string `json:"stopped_runtime_state,omitempty"`
+}
+
+type proxyProjectOutput struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ShortID         string `json:"short_id"`
+	SourcePath      string `json:"source_path"`
+	CurrentRevision uint64 `json:"current_revision"`
+	SpecHash        string `json:"spec_hash"`
+	AgentCount      uint32 `json:"agent_count"`
+	SchedulerCount  uint32 `json:"scheduler_count"`
+}
+
+func inspectProxyAgent(ctx context.Context, cfg ProxyProbeConfig, run func(context.Context, string, ...string) ([]byte, error)) error {
+	args := []string{"--json", "--host", cfg.AgentComposeHost, "--project-name", proxyProbeProject, "sandbox", "ls"}
+	data, err := run(ctx, cfg.Binary, args...)
+	if err != nil {
+		return errors.New("agent-compose probe sandbox listing failed")
+	}
+	var output proxySandboxListOutput
+	if err := decodeStrictJSON(data, &output); err != nil {
+		return errors.New("agent-compose probe sandbox listing returned invalid JSON")
+	}
+	var project proxyProjectOutput
+	if err := decodeStrictJSON(output.Project, &project); err != nil || project.Name != proxyProbeProject || strings.TrimSpace(project.ID) == "" {
+		return errors.New("agent-compose probe sandbox listing returned the wrong project")
+	}
+	if len(output.Sandboxes) != 1 {
+		return errors.New("agent-compose probe sandbox listing returned the wrong sandbox set")
+	}
+	sandbox := output.Sandboxes[0]
+	if sandbox.SandboxID != cfg.SandboxID || sandbox.Agent != "probe" || sandbox.Status != "running" || sandbox.Driver != "docker" || sandbox.Image != cfg.GuestImage || sandbox.StoppedRuntimeState != "retained" {
+		return errors.New("agent-compose probe sandbox listing did not match the fixed project binding")
+	}
+	return nil
+}
+
+func octoBusProxyProbe(run func(context.Context, string, ...string) ([]byte, error)) func(context.Context, ProxyProbeConfig) error {
+	return func(ctx context.Context, cfg ProxyProbeConfig) error {
+		common := []string{"--json", "--host", cfg.AgentComposeHost, "--project-name", proxyProbeProject}
+		if err := inspectProxyAgent(ctx, cfg, run); err != nil {
+			return err
+		}
+		inspectArgs := append(append([]string(nil), common...), "inspect", "sandbox", cfg.SandboxID)
+		data, err := run(ctx, cfg.Binary, inspectArgs...)
+		if err != nil {
+			return errors.New("agent-compose sandbox inspection failed")
+		}
+		var sandbox proxySandboxOutput
+		if err := decodeStrictJSON(data, &sandbox); err != nil {
+			return errors.New("agent-compose sandbox inspection returned invalid JSON")
+		}
+		if sandbox.SandboxID != cfg.SandboxID || sandbox.VMStatus != "running" || sandbox.Driver != "docker" || sandbox.GuestImage != cfg.GuestImage || sandbox.Tags["capset"] != "dev" || sandbox.StoppedRuntimeState != "retained" {
+			return errors.New("agent-compose sandbox does not match the fixed live probe contract")
+		}
+		execArgs := append(append([]string(nil), common...), "exec", cfg.SandboxID, "--command", proxyProbeCommand)
+		data, err = run(ctx, cfg.Binary, execArgs...)
+		if err != nil {
+			return errors.New("agent-compose live proxy execution failed")
+		}
+		var result proxyExecOutput
+		if err := decodeStrictJSON(data, &result); err != nil {
+			return errors.New("agent-compose live proxy execution returned invalid JSON")
+		}
+		if strings.TrimSpace(result.ExecID) == "" || result.SandboxID != cfg.SandboxID || result.Success == nil || !*result.Success || result.ExitCode == nil || *result.ExitCode != 0 || result.Command != "bash" || len(result.Args) != 2 || result.Args[0] != "-lc" || result.Args[1] != proxyProbeCommand || result.Stderr != "" || result.Error != "" {
+			return errors.New("agent-compose live proxy execution did not satisfy the fixed command contract")
+		}
+		for _, output := range []string{result.Stdout, result.Output} {
+			var response proxyCalculatorResponse
+			if err := decodeStrictJSON([]byte(output), &response); err != nil || response.Result == nil || *response.Result != 42 || response.ServiceID != "sas101-calculator" || response.InstanceID != "calculator-test" || response.Label != "sas101" {
+				return errors.New("agent-compose live proxy response was invalid")
+			}
+		}
+		return nil
+	}
 }
 
 func inspectDockerImage(ctx context.Context, binary, image string, run func(context.Context, string, ...string) ([]byte, error)) error {
@@ -958,20 +1399,20 @@ func probeDNS(ctx context.Context, timeout time.Duration, hosts []string, probe 
 	return StatusPassed, "network DNS was verified"
 }
 
-func probeProxy(ctx context.Context, timeout time.Duration, agentHost, octobusHost string, probe func(context.Context, string, string) error) (CheckStatus, string) {
+func probeProxy(ctx context.Context, timeout time.Duration, cfg ProxyProbeConfig, probe func(context.Context, ProxyProbeConfig) error) (CheckStatus, string) {
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if probeCtx.Err() != nil {
-		return StatusUnknown, "Sandbox to OctoBus proxy could not be verified"
+		return StatusUnknown, "live Sandbox to OctoBus proxy synthetic Add could not be verified"
 	}
-	err := probe(probeCtx, agentHost, octobusHost)
+	err := probe(probeCtx, cfg)
 	if probeCtx.Err() != nil {
-		return StatusUnknown, "Sandbox to OctoBus proxy could not be verified"
+		return StatusUnknown, "live Sandbox to OctoBus proxy synthetic Add could not be verified"
 	}
 	if err != nil {
-		return StatusFailed, "Sandbox to OctoBus proxy probe failed"
+		return StatusFailed, "live Sandbox to OctoBus proxy synthetic Add probe failed"
 	}
-	return StatusPassed, "Sandbox to OctoBus proxy was verified"
+	return StatusPassed, "live Sandbox to OctoBus proxy synthetic Add returned 42"
 }
 
 func probeHost(ctx context.Context, timeout time.Duration, raw string, dial func(context.Context, string, string) (net.Conn, error), label string) (CheckStatus, string) {
@@ -1059,6 +1500,13 @@ func inspectCompose(path string, read func(string) ([]byte, error)) ([]byte, err
 }
 
 func readFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("compose path is not a regular file")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
