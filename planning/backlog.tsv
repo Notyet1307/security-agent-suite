@@ -4,11 +4,12 @@ SAS-002	M0	启用 CI CodeQL Dependabot 与分支保护	phase:M0,type:infra,prior
 SAS-003	M0	建立许可证 NOTICE 与第三方引入流程	phase:M0,type:governance,priority:P0	SAS-001	新依赖有来源 许可证 commit 和 SBOM 记录
 SAS-101	M1	实现 sasctl doctor 环境核验	phase:M1,type:feature,priority:P0	SAS-001	输出 Docker agent-compose OctoBus Provider 镜像与网络检查
 SAS-102	M1	固定 agent-compose 与 Guest 镜像版本	phase:M1,type:infra,priority:P0	SAS-101	版本和 digest 写入 release manifest
-SAS-103	M1	完成五个 Agent 的真实 Sandbox smoke	phase:M1,type:test,priority:P0	SAS-102	每个 Agent 20 次运行达到门槛
-SAS-104	M1	实现 Agent 输出 JSON Schema 强校验	phase:M1,type:feature,priority:P0	SAS-103	非法输出不能 succeeded 且原始输出保留
-SAS-105	M1	记录 daemon run sandbox model skill tool provenance	phase:M1,type:feature,priority:P1	SAS-103	Run 可复现执行版本
-SAS-106	M1	将取消传播到 agent-compose 实际运行	phase:M1,type:feature,priority:P0	SAS-103	取消后 Sandbox 停止且状态一致
-SAS-107	M1	建立执行错误分类与安全重试策略	phase:M1,type:reliability,priority:P1	SAS-103	瞬时错误可重试 有副作用错误不自动重试
+SAS-103	M1	完成五个 Agent 的真实 Sandbox smoke	phase:M1,type:test,priority:P0	SAS-102	仓库验收 harness 与离线契约交付；真实 live gate 由 SAS-108 跟踪
+SAS-104	M1	实现 Agent 输出 JSON Schema 强校验	phase:M1,type:feature,priority:P0	SAS-102	非法输出不能 succeeded 且原始输出保留；完整 Draft 2020-12 范围另行定义
+SAS-105	M1	记录 daemon run sandbox model skill tool provenance	phase:M1,type:feature,priority:P1	SAS-102	Run 记录 runtime 实际提供的 daemon sandbox model skill tool provenance；配置值不算证据
+SAS-106	M1	将取消传播到 agent-compose 实际运行	phase:M1,type:feature,priority:P0	SAS-102	取消后 Sandbox 停止且状态一致；需真实 downstream evidence
+SAS-107	M1	建立执行错误分类与安全重试策略	phase:M1,type:reliability,priority:P1	SAS-102	瞬时错误仅在权威无副作用或幂等信号下重试；有副作用不自动重试
+SAS-108	M1	完成五个 Agent 的授权真实 Sandbox 验收	phase:M1,type:test,priority:P0	SAS-101,SAS-102,SAS-104,SAS-105,SAS-106	100/100 正常运行、10/10 lifecycle、20 条独立 controls、实际 runtime provenance 全部有治理证据
 SAS-201	M2	实现 Artifact 上传登记与下载授权	phase:M2,type:feature,priority:P0	SAS-104	支持大文件引用 哈希 媒体类型与租户隔离
 SAS-202	M2	实现 append-only Evidence Store	phase:M2,type:feature,priority:P0	SAS-201	Evidence 保存来源 工具 参数 版本 时间和哈希
 SAS-203	M2	实现 Finding Timeline AttackPath 引用校验	phase:M2,type:feature,priority:P0	SAS-202	高风险 Finding 无证据时拒绝

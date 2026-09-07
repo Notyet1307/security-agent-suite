@@ -118,9 +118,13 @@ SAS-103 收集固定为五个 Agent 各 20 个正常运行（100 个，必须 10
 
 | 故障 | Go Run 结果 | 操作 |
 | --- | --- | --- |
-| daemon 不可达 | failed / executor_error | 恢复 daemon 后由调用方新建 Run；M1 增加受控重试 |
+| agent-compose Connect 不可用（exit code 3） | failed / agent_compose_unavailable | 修复依赖后由调用方新建 Run；没有权威无副作用或幂等信号时不得自动重试 |
+| 执行器启动或协议错误 | failed / executor_error | 保留结构化错误；确认版本、配置和 daemon 状态后由调用方新建 Run |
 | 队列满 | failed / queue_unavailable | 扩容或限流；不静默丢任务 |
 | Provider 超时 | failed / executor_timeout | 检查模型、上下文、工具阻塞 |
-| 输出非 JSON | partial/failed（目标） | 保存原始输出，进入回归修复 |
-| Sandbox 被取消 | cancelled/failed | 审计取消人和原因 |
+| 输出非 JSON 或契约无效 | failed / agent_output_malformed 或 agent_output_contract_invalid | 保留受控原始输出/Artifact，修复后重新创建 Run |
+| API/Go context 取消 | cancelled / executor_cancelled | 轮询到 terminal；审计取消人和原因 |
+| Agent Compose runtime 取消 | cancelled / agent_compose_cancelled | 仅在 runtime envelope 成功解码且 Go context 未到期时使用；保留 provenance |
 | OctoBus 暂不可用 | 工具错误 | Agent 必须返回证据缺口，不能猜测 |
+
+本表只定义错误分类和操作，不启用盲重试；任何重试实现必须先有权威的“未产生外部副作用”或幂等证明。

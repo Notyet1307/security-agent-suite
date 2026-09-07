@@ -80,6 +80,8 @@ M3～M5 可以部分并行；M7 不应早于授权、证据和隔离底座完成
 
 证明五个 Agent 都能在目标交付环境中由 agent-compose 启动、取消、超时并返回结构化结果。
 
+仓库可达的 harness、Mock 和 CI 证据与真实 live 验收分开记录；Issue #9 仅关闭前者范围。SAS-108 是 live gate，不得用离线成功替代。
+
 ### 关键变量
 
 - Linux 架构、Docker/BoxLite、磁盘、内存、网络和 DNS；
@@ -93,13 +95,15 @@ M3～M5 可以部分并行；M7 不应早于授权、证据和隔离底座完成
 
 1. 新增 `sasctl doctor`：检查 Go 服务、agent-compose、Docker、镜像、daemon、OctoBus 和模型 Provider；
 2. 固定 agent-compose 版本、Guest 镜像 digest 和 compose schema；
-3. 在五个 Agent 上分别完成最小真实运行；
-4. 将 CLI JSON、daemon run ID、sandbox ID、模型和版本写入 Run；
-5. 对 Agent 最终输出执行 JSON Schema 强校验；
-6. 将 API cancel 传播到 agent-compose 真实 Run；
-7. 增加瞬时错误重试，只允许在“未产生外部副作用”时重试；
-8. 建立 Provider 失败、Sandbox 失败、工具失败和输出失败的错误分类；
-9. 为目标 Mac mini/服务器建立环境基线文档和可重复检查脚本。
+3. 对 Agent 最终输出执行 JSON Schema 强校验，明确受支持的 schema 子集和拒绝路径；
+4. 将 CLI JSON、daemon run ID、sandbox ID、实际模型和 runtime 版本写入 Run；
+5. 将 API cancel 传播到 agent-compose 真实 Run，并轮询到终态；
+6. 建立 Provider 失败、Sandbox 失败、工具失败和输出失败的错误分类；
+7. 在五个 Agent 上分别完成最小真实运行，并保存脱敏 evidence；
+8. 对每个 Agent 完成一次真实 cancel 和 timeout，证明正确终态与 downstream acknowledgement；
+9. 仅在有权威“未产生外部副作用”或幂等信号后增加瞬时错误重试；无信号时保持不重试；
+10. 获取既有治理流程认可的 20 条外部 controls 独立 signed/independent attestation 及 validator、runtime build provenance；
+11. 为目标 Mac mini/服务器建立环境基线文档和可重复检查脚本。
 
 ### 产物
 
@@ -107,15 +111,18 @@ M3～M5 可以部分并行；M7 不应早于授权、证据和隔离底座完成
 - 真实 executor 集成测试；
 - 运行 provenance 字段；
 - 五个 Agent 的 sandbox smoke evidence；
-- 环境兼容矩阵。
+- 环境兼容矩阵；
+- 20 条 controls attestation 及 validator、runtime build provenance 记录。
 
 ### 验收门槛
 
-- 五个 Agent 各运行 20 次，创建成功率 ≥ 99%；
-- 超时和取消 100% 能进入正确终态；
+- 五个 Agent 各运行 20 次，100/100 次通过完整 evidence gate；
+- 每个 Agent 一次真实 cancel 和一次 timeout，10/10 进入正确终态并有 downstream acknowledgement；
+- 恰好 20 条独立外部 controls（四类 × 五个 Agent）由既有治理流程认可的 attestation 覆盖；
+- 每次运行都有权威实际 model、Skill/tool 和 runtime-version provenance；
 - 非 Schema 输出不能标记 succeeded；
-- daemon/OctoBus 不可用时错误可识别，不产生假结果；
-- Agent 无权使用未声明 capset。
+- daemon、agent-compose 或 OctoBus 不可用时错误可识别，不产生假结果；
+- Agent 无权使用未声明 capset，且瞬时错误没有无权威信号的盲重试。
 
 ### 建议投入
 
@@ -430,7 +437,7 @@ M3～M5 可以部分并行；M7 不应早于授权、证据和隔离底座完成
 | B：安全能力 | M5、M6、M7 | OctoBus 工具、证据和安全测试 |
 | C：知识/交付 | M3、M4 | 模板、法规知识库、Fixture、验收材料 |
 
-每阶段只允许一个“承重主线”；其他并行任务必须有稳定接口，避免三个人同时修改同一核心状态机。
+默认每个任务及其共享文件只有一个写作者；读者和审阅者可以并行，但同一核心状态或文件必须先完成明确交接。每阶段只允许一个“承重主线”，其他并行任务必须有稳定接口。
 
 ## 4. 最快可落地的六周节奏
 
@@ -453,7 +460,8 @@ M3～M5 可以部分并行；M7 不应早于授权、证据和隔离底座完成
 - 正常、失败、超时、取消、重启和越权路径有测试；
 - 真实 Fixture 和期望结果进入版本库或受控数据仓；
 - 关键结论可追溯到 Evidence；
-- 安全边界经过独立 Review；
-- `make verify`、`make smoke` 和阶段评测通过；
+- 安全边界经过不产出该实现的独立 Review，并有独立验收记录；
+- `make verify`、`make smoke` 和阶段评测通过；离线或 Mock 结果不得满足 live 验收门槛；
+- live execution 有授权引用、非生产范围、停止/清理/保留决定及脱敏证据；
 - 有升级和回滚说明；
 - 演示效果不依赖人工临时改库或改 Prompt。
