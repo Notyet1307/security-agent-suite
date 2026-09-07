@@ -25,6 +25,7 @@ CGO_ENABLED=0 go build -trimpath -o bin/sasctl ./cmd/sasctl
 
 echo '[5/6] Contract and repository checks'
 python3 scripts/verify_release_test.py
+python3 scripts/sas103_acceptance_test.py
 python3 scripts/verify_release.py .
 python3 - <<'PY'
 from pathlib import Path

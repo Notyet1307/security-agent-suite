@@ -5,7 +5,7 @@
 本仓库不复制 agent-compose 源码。`internal/executor/agentcompose` 通过固定 CLI 参数调用其 daemon：
 
 ```text
-agent-compose --json --timeout <duration>
+agent-compose --json --timeout 0
   [--host <daemon>]
   -f <agent-compose.yml>
   run <agent-id>
@@ -14,6 +14,8 @@ agent-compose --json --timeout <duration>
 ```
 
 命令参数由 Go 生成，调用方无法注入额外参数或 Shell。
+`--timeout 0` 只禁用 CLI HTTP client timeout；正常 Run 的 deadline 由 Go context 根据 agent 的 `default_timeout` 确定，并以 `SAS_RUN_TIMEOUT` 作为兜底和上限，再按每个 Run 的 `max_duration` 缩短。`SAS_AGENT_COMPOSE_TIMEOUT` 仅在 executor 未收到有效的 `request.Timeout` 时作为后备值，不能覆盖上述 deadline；CLI 保持 timeout 为 0，以便 SIGINT cancellation defer 可以运行。
+
 
 ## 2. 准备
 
@@ -52,7 +54,7 @@ CLI 适配器的结果契约为：
 
 - 完整 CLI JSON envelope 保存为受控 Artifact，仅供审计和排障；
 - 顶层 `output` 仅视为 transcript，普通副本会脱敏后保存；
-- 只有 `result_json.finalText` 进入业务结果：原文成为 `RunResult.RawOutput`，其普通 `final-output` 副本同样脱敏；
+- 业务 `RunResult.RawOutput` 仅在 runtime 使用配置中 pinned 的 provider（允许 `codex`、`claude`、`gemini`、`opencode`、`pi`、`dsh`；当前环境为 `pi`）且 `result_json.finalTextSource=provider_message` 时取 `finalText`；`transcript_fallback` 只作为 provenance 标记和诊断 Artifact 保留，不进入业务结果。由于 pinned Pi fallback 是可能混入 stderr 和不可信文本的拼接 transcript，应用层故意 fail closed；这可能使 live gate 低于 99%，不构成验收；
 - 应用层 `validation.Gate` 执行受支持的五类契约与 evidence 校验，并拒绝格式错误或不可信的输出。
 
 ## 5. 从 CLI 到 Connect/HTTP
@@ -95,7 +97,24 @@ done
 ```
 核验失败时不要重标记或替换镜像；恢复上一份已审阅的 manifest、compose 和完整 RepoDigest 输入，按受控部署流程停止并重建受影响的 container/Sandbox，再重新运行上述核验和 Doctor。运行中 container 的 `.Id` 不是 RepoDigest 证明。升级同样先核验新输入、再重建受影响的 Sandbox；该契约不替代真实 Agent、capset 隔离或完整生产部署验收。
 
-## 8. 故障处理
+## 8. SAS-103 证据与取消契约
+
+SAS-103 收集固定为五个 Agent 各 20 个正常运行（100 个，必须 100/100），外加每个 Agent 一个取消和一个超时 lifecycle 检查（10 个）。正常运行须通过仓库构建路径 `bin/sasctl` 的 `sasctl validate-output`；证据报告绑定 validator binary、原始输出、验证契约和投影文件的 SHA-256。投影只保留 allowlist 字段及 request/body、tenant、原始输出的 hash。
+正常输出校验使用带租户/API 认证的请求下载精确 `agent-compose-final-output.json` 字节，核对 Artifact 元数据的 SHA-256 和 size，与 API `raw_output` 做严格 JSON 语义等价比较，再验证 Agent Schema；证据只保留哈希和元数据，不保留 Artifact 正文。
+业务 `RunResult.RawOutput` 仅接受配置中 pinned 的 runtime provider（允许 `codex`、`claude`、`gemini`、`opencode`、`pi`、`dsh`；当前环境为 `pi`）且 `result_json.finalTextSource=provider_message`；`transcript_fallback` 只作为 provenance 标记和诊断 Artifact 保留，不进入业务结果。Pinned Pi fallback 是可能混入 stderr 和不可信文本的拼接 transcript，故应用层 fail closed；这可能使 live gate 低于 99%，不构成验收。
+
+
+外部控制不是 harness 自造的案例：必须由独立执行的真实非生产控制提供，并经既有治理流程认可的外部签名/独立可审阅 attestation 约束，且恰好为四类乘以五个 Agent，即 20 个。当前仓库没有可信签名机制；`--controls` 明确返回 `controls_unverified`，导入控制不能满足 `verify_report` 或任何验收计数。Hash、reviewer、时间戳和投影交换只能证明字节完整性，不能证明来源、真实性或 runtime truth；本 harness 不会自创认证。
+
+超时 lifecycle 必须先观察至少一个非终态轮询，再核对配置的精确 `max_duration`；证据不能证明墙钟到期。`downstream_acknowledged` 仅在取消或超时的最终 Agent Compose runtime envelope 已成功解码时为真；其中 `daemon_run_id` 与 `sandbox_id` 都必须是 64 个小写十六进制字符，runtime `status` 必须是 `canceled` 或 `cancelled`。缺失、无法解码或字段不符时必须 fail closed，SAS-103 验收被阻断。
+
+中止收集会在任何 create POST 可能已发出后标记 `cleanup_required`，包括中断、响应不明确或 run ID 校验前的无效响应；operator 必须先停止/排空 acceptance control plane 并按 agent-compose 受控流程清理 retained synthetic Sandbox。
+
+`POST /v1/runs/{runID}/cancel` 对运行中的 Run 在停止期间返回 `202`，并在取消立即得到 terminal Run 时返回 `200`；Go context 是权威，运行中 API 取消最终为 `cancelled`，其 `error_code` 为 `executor_cancelled`。只有 Go context 尚未到期而 Agent Compose runtime envelope 自身报告 `canceled`/`cancelled` 时才使用 `agent_compose_cancelled`；成功解码的 runtime provenance 仍保留。取消和超时都必须轮询 `GET /v1/runs/{runID}` 直到 terminal 状态；`202` 或发出 SIGINT 本身不是完成证明。
+
+中止或失败的收集应先停止 SAS acceptance control plane，再由获授权的 operator 按 agent-compose 受控流程清理 retained synthetic Sandbox，并恢复已审阅的先前二进制与配置。证据保留或删除须由明确的 retention 决定；审阅前绝不自动删除证据。
+
+## 9. 故障处理
 
 | 故障 | Go Run 结果 | 操作 |
 | --- | --- | --- |
