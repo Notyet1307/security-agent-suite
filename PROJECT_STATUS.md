@@ -1,7 +1,7 @@
 # Project Status
 
 **Version:** `v0.1.0-alpha.1`  
-**Status date:** 2026-09-06
+**Status date:** 2026-09-07
 **Positioning:** runnable engineering baseline; not a production security-analysis product.
 
 ## Completed
@@ -18,7 +18,7 @@
 
 ## Verification evidence
 
-The following offline checks pass in the current worktree:
+The following repository-level checks are recorded across GitHub CI and sanitized local verification. They are offline or Mock evidence, not live Agent acceptance:
 
 ```text
 make verify
@@ -27,9 +27,11 @@ make smoke
 git diff --check
 ```
 
+PR #60's sanitized local smoke evidence used `scripts/smoke.sh`; the CI workflow's `make smoke` is Mock-only. Neither is live Agent evidence.
+
 PyYAML is not installed, so `make verify` skipped YAML syntax parsing; its semantic checks still validated five agents, 15 skills, JSON contracts, and local links. The fixed `agent-compose v2609.1.0` binary normalized the current five-Agent compose shape to 8,964 bytes; its normalized output preserves the `${AGENT_COMPOSE_GUEST_IMAGE}` image reference, which Doctor now reconciles only against the already-validated source interpolation and configured digest.
 
-The smoke test proves two critical paths:
+The Mock smoke test proves two critical paths:
 
 1. A normal event-triage run reaches `succeeded` in Mock mode.
 2. An active attack-path-validation run stops at `waiting_approval` and executes only after server-side approval.
@@ -53,11 +55,32 @@ The target evidence above used only the dedicated non-production synthetic probe
 - SAS-101 is complete, but it does not claim real execution capability for the five Agents or complete capset isolation; the running target containers are not a release deployment.
 - File storage is single-node development storage, not HA storage.
 - Kubernetes manifests are a production migration starting point, not a completed production deployment.
+- GitHub currently reports the default `main` branch as unprotected; CI workflow presence is not branch-protection evidence.
 
 ## SAS-103 status and hard gate
 
-SAS-103 harness and offline work is in progress. Live SAS-103 is **not complete**: live acceptance evidence is absent; Issue #9 remains open. The harness can produce a structural raw index for the required 100 normal runs and 10 lifecycle checks, but `--controls` is currently blocked with `failure: "controls_unverified"`; `verify_report` raises `controls_unverified` rather than returning counts until an external trusted attestation mechanism exists.
+The SAS-103 repository harness, offline contracts, cancellation/timeout contracts, schema gate, artifact binding, provenance handling, tests, and documentation were delivered by PR #60. Issue #9 is closed for that repository-reachable scope. Live SAS-103 remains **not complete**: live acceptance evidence is absent. The harness can produce a structural raw index for the required 100 normal runs and 10 lifecycle checks, but `--controls` is currently blocked with `failure: "controls_unverified"`; `verify_report` raises `controls_unverified` rather than returning counts until an external trusted attestation mechanism exists.
 
 The remaining gates are 100/100 normal runs, 10 lifecycle checks, a fresh operator-authorized credential for a non-production provider, and independently executed, human-reviewed real non-production evidence for exactly 20 external controls (four control kinds across five Agents) covered by an existing governed signed/independent attestation and build provenance. Missing authoritative actual model/runtime-version provenance for each run and a missing authoritative no-side-effect/idempotency signal for transient retries are additional blockers; configured values are inputs and must not be called proof. The deliberate pinned-provider/`finalTextSource=provider_message` fail-closed gate may keep the live pass rate below 99% and is not acceptance evidence. Hashes, reviewer metadata, timestamps, and projected exchanges are not authentication. Until all are available, do not represent SAS-103 as complete or use customer data.
+
+M1 issue status: SAS-104 has repository-level supported-subset output validation; SAS-105 lacks authoritative actual model, Skill, and tool versions; SAS-106 lacks real downstream Sandbox cancellation evidence; SAS-107 has partial error classification but no safe retry. None of these is closed by Issue #9.
+
+## SAS-108 preflight
+
+**Decision:** `BLOCKED`; 本轮批准只覆盖前置核验，未执行任何 live Provider、agent-compose、OctoBus、网络或 Sandbox 动作。
+
+| Gate | Status | Evidence/source |
+| --- | --- | --- |
+| 授权引用与批准的非生产范围 | `BLOCKED` | 未提供可验证的 live authorization reference；preflight 批准不等于 live 执行授权 |
+| fresh operator credential | `UNVERIFIED` | 未读取 `.env` 或 credential；需要 operator 只确认存在性，不提交凭据值 |
+| live SAS listener | `UNVERIFIED` | 本轮未探测 endpoint；没有获授权的 listener 证据 |
+| validator/build provenance | `BLOCKED` | `release-manifest.json` 只固定部署元数据；无受治理 build attestation，当前 `bin/sasctl` 不存在 |
+| 20-control attestation | `BLOCKED` | `scripts/sas103_acceptance.py` 的 `import_controls`/`verify_controls` 明确返回 `controls_unverified` |
+| actual model/Skill/tool/runtime provenance | `BLOCKED` | `docs/architecture/data-model.md` 与 runtime adapter 没有权威实际版本来源；配置值不算证据 |
+| no-side-effect/idempotency retry signal | `BLOCKED` | 当前没有权威信号或安全重试实现；不得自动重试 |
+| independent acceptance owner | `PENDING` | 尚未指定不参与实现的独立验收人 |
+| repository inputs | `PASS (offline only)` | pinned manifest 与五个 synthetic fixtures 已通过结构核验；不构成 live evidence |
+
+任一 `BLOCKED`、`UNVERIFIED` 或 `PENDING` 都禁止进入 SAS-108 live collect；本记录不是 acceptance evidence。
 
 See [`docs/roadmap/implementation-plan.md`](docs/roadmap/implementation-plan.md) and [`planning/backlog.tsv`](planning/backlog.tsv).
