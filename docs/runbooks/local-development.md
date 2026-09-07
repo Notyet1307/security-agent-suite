@@ -1,5 +1,11 @@
 # 本地开发运行手册
 
+## 命令副作用与授权边界
+
+Makefile 在加载任何目标前会读取并 export `.env`；只使用无秘密的本地配置，并在运行命令前检查其内容。不要在共享或验收工作区直接执行 `make clean`：它会删除 `bin`、`dist`、`coverage.txt` 和 `var` 中的构建、覆盖率、状态及证据数据；删除前必须有明确的 retention 决定。
+
+任何真实 Provider、agent-compose、OctoBus、网络或目标环境动作，都需要显式授权引用、批准的非生产范围、fresh operator-owned credential，以及停止、清理和保留计划。缺少任一前置时只运行离线或 Mock 检查。
+
 ## Mock 模式
 
 ```bash
@@ -55,11 +61,12 @@ make smoke
    ```
 
    检查 JSON 报告与退出码；
-7. 提交每个 Agent 的示例请求。
+7. 仅在授权引用、非生产范围、停止/清理/保留计划和 fresh operator credential 都已就绪后提交每个 Agent 的示例请求；否则停在离线检查。
 
 ## SAS-103 真实 Sandbox 验收
 
 这不是 `make verify` 或 Mock smoke。只能使用 [`evals/sas103-fixtures.json`](../../evals/sas103-fixtures.json) 中的合成 fixture；不得输入客户数据，或把 Provider/OctoBus token、API key 或客户内容写入仓库、命令行或证据目录。`.env` 不得保存真实 `SAS_API_KEY`；它只能从 operator-owned、仓库外且权限为 `0600` 的环境文件加载。
+开始真实 `collect` 前，须在仓库外记录授权引用、批准范围、operator、停止/清理/保留决定和独立验收人；这些治理记录不能由 hash 或 Mock/CI 结果替代。
 
 ```sh
 set -a
