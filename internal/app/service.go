@@ -215,11 +215,29 @@ func (s *Service) CancelRun(ctx context.Context, tenantID, runID, actor, reason 
 	if _, err := s.GetRun(ctx, tenantID, runID); err != nil {
 		return nil, err
 	}
+
+	// Serialize the running transition and cancellation request so a run cannot
+	// become terminal before its executor has had a chance to acknowledge it.
 	s.cancelMu.Lock()
 	if cancel, ok := s.cancels[runID]; ok {
-		cancel()
+		now := time.Now()
+		updated, err := s.store.Update(ctx, runID, func(current *domain.Run) error {
+			if current.Scope.TenantID != tenantID {
+				return domain.ErrNotFound
+			}
+			if current.Status.Terminal() {
+				return nil
+			}
+			current.RecordEvent("run.cancel_requested", reason, actor, nil, now)
+			return nil
+		})
+		if err == nil {
+			cancel()
+		}
+		s.cancelMu.Unlock()
+		return updated, err
 	}
-	s.cancelMu.Unlock()
+
 	now := time.Now()
 	transitioned := false
 	updated, err := s.store.Update(ctx, runID, func(current *domain.Run) error {
@@ -236,6 +254,7 @@ func (s *Service) CancelRun(ctx context.Context, tenantID, runID, actor, reason 
 		transitioned = true
 		return nil
 	})
+	s.cancelMu.Unlock()
 	if err == nil && transitioned {
 		s.metrics.RunCompleted(domain.RunStatusCancelled)
 	}
@@ -304,17 +323,6 @@ func (s *Service) process(runID string) error {
 		_, failErr := s.failRun(ctx, runID, "prompt_build_failed", err.Error())
 		return failErr
 	}
-	now = time.Now()
-	run, err = s.store.Update(ctx, runID, func(current *domain.Run) error {
-		if current.Status == domain.RunStatusCancelled {
-			return nil
-		}
-		return current.Transition(domain.RunStatusRunning, "executor invocation started", s.executor.Name(), now)
-	})
-	if err != nil || run.Status == domain.RunStatusCancelled {
-		return err
-	}
-
 	timeout := agent.DefaultTimeout
 	if timeout <= 0 || timeout > s.cfg.MaxRunTimeout {
 		timeout = s.cfg.MaxRunTimeout
@@ -325,14 +333,38 @@ func (s *Service) process(runID string) error {
 		}
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	s.registerCancel(runID, cancel)
+
+	// Hold cancelMu across the running transition so CancelRun either sees a
+	// pre-executor run (and cancels it immediately) or a registered executor.
+	s.cancelMu.Lock()
+	run, err = s.store.Update(ctx, runID, func(current *domain.Run) error {
+		if current.Status.Terminal() {
+			return nil
+		}
+		return current.Transition(domain.RunStatusRunning, "executor invocation started", s.executor.Name(), time.Now())
+	})
+	if err == nil && run.Status == domain.RunStatusRunning {
+		s.cancels[runID] = cancel
+	}
+	s.cancelMu.Unlock()
+	if err != nil {
+		cancel()
+		return err
+	}
+	if run.Status != domain.RunStatusRunning {
+		cancel()
+		return nil
+	}
+
 	result, execErr := s.executor.Execute(execCtx, domain.ExecutionRequest{Run: *run, Agent: agent, Prompt: promptText, Timeout: timeout})
 	cancel()
-	s.unregisterCancel(runID)
 	if execErr == nil {
 		result = validation.Gate(agent.ID, result, s.executor.Name())
 	}
 
+	// Keep the cancellation registration until the terminal state is persisted;
+	// otherwise an API cancel can race in after a successful executor return.
+	s.cancelMu.Lock()
 	finish := time.Now()
 	completedByWorker := false
 	updated, updateErr := s.store.Update(context.Background(), runID, func(current *domain.Run) error {
@@ -342,11 +374,18 @@ func (s *Service) process(runID string) error {
 		if execErr != nil {
 			code := "executor_error"
 			message := execErr.Error()
+			status := domain.RunStatusFailed
 			if errors.Is(execErr, context.DeadlineExceeded) {
 				code = "executor_timeout"
 			}
 			if errors.Is(execErr, context.Canceled) {
 				code = "executor_cancelled"
+				for _, event := range current.Events {
+					if event.Type == "run.cancel_requested" {
+						status = domain.RunStatusCancelled
+						break
+					}
+				}
 			}
 			failureResult := result.Result
 			failureResult.Executor = s.executor.Name()
@@ -356,7 +395,7 @@ func (s *Service) process(runID string) error {
 				failureResult.Summary = "执行器未完成运行。"
 			}
 			current.SetResult(failureResult, finish)
-			if err := current.Transition(domain.RunStatusFailed, message, s.executor.Name(), finish); err != nil {
+			if err := current.Transition(status, message, s.executor.Name(), finish); err != nil {
 				return err
 			}
 			completedByWorker = true
@@ -364,7 +403,7 @@ func (s *Service) process(runID string) error {
 		}
 		status := result.Status
 		switch status {
-		case domain.RunStatusSucceeded, domain.RunStatusPartial, domain.RunStatusFailed:
+		case domain.RunStatusSucceeded, domain.RunStatusPartial, domain.RunStatusFailed, domain.RunStatusCancelled:
 		default:
 			status = domain.RunStatusFailed
 			result.Result.ErrorCode = "invalid_executor_status"
@@ -377,6 +416,8 @@ func (s *Service) process(runID string) error {
 		completedByWorker = true
 		return nil
 	})
+	delete(s.cancels, runID)
+	s.cancelMu.Unlock()
 	if updateErr != nil {
 		return updateErr
 	}
@@ -404,18 +445,6 @@ func (s *Service) failRun(ctx context.Context, runID, code, message string) (*do
 		s.metrics.RunCompleted(domain.RunStatusFailed)
 	}
 	return updated, err
-}
-
-func (s *Service) registerCancel(runID string, cancel context.CancelFunc) {
-	s.cancelMu.Lock()
-	defer s.cancelMu.Unlock()
-	s.cancels[runID] = cancel
-}
-
-func (s *Service) unregisterCancel(runID string) {
-	s.cancelMu.Lock()
-	defer s.cancelMu.Unlock()
-	delete(s.cancels, runID)
 }
 
 func (s *Service) recoverRuns() error {

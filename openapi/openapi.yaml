@@ -227,6 +227,10 @@ paths:
         "200":
           description: Artifact bytes
           content:
+            application/json:
+              schema: {}
+            text/plain:
+              schema: { type: string }
             application/octet-stream:
               schema: { type: string, format: binary }
         default: { $ref: "#/components/responses/Error" }
@@ -268,7 +272,20 @@ paths:
                 reason: { type: string }
       responses:
         "200":
-          description: Cancelled run
+          description: >-
+            Cancellation has already reached a terminal Run. For a running
+            API-requested cancellation, the terminal result uses
+            `executor_cancelled`; a runtime canceled envelope under an
+            unexpired Go context uses `agent_compose_cancelled`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "202":
+          description: >-
+            Cancellation requested for a running Run; stopping is still in
+            progress. The authoritative Go context eventually records terminal
+            `cancelled` with `error_code=executor_cancelled`; poll the Run until
+            terminal. Successfully decoded runtime provenance remains available.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Run" }
@@ -456,9 +473,11 @@ components:
         provenance:
           type: object
           description: >-
-            Optional runtime metadata copied only from trusted decoded runtime
-            metadata. Omit it when unavailable; malformed or truncated envelopes
-            must not synthesize provenance. The exact runtime envelope remains a
+            Optional runtime metadata copied only from successfully decoded
+            trusted runtime metadata. It remains available when Go later
+            classifies an API cancellation as `executor_cancelled`. Omit it
+            when unavailable; malformed or truncated envelopes must not
+            synthesize provenance. The exact runtime envelope remains a
             controlled artifact.
           additionalProperties: false
           properties:
@@ -492,7 +511,16 @@ components:
         artifacts: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
         limitations: { type: array, items: { type: string } }
         raw_output: {}
-        error_code: { type: string }
+        error_code:
+          type: string
+          description: >-
+            `executor_cancelled` means an API-requested cancellation reached
+            the authoritative Go context; a running Run may first return 202
+            while stopping and ultimately become terminal `cancelled`.
+            `agent_compose_cancelled` is reserved for a successfully decoded
+            runtime envelope reporting `canceled`/`cancelled` while the Go
+            context is still unexpired. Successfully decoded runtime
+            provenance remains under `provenance`.
         error_message: { type: string }
     RunEvent:
       type: object

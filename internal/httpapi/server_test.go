@@ -74,6 +74,7 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var completed domain.Run
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		loaded := getRunHTTP(t, server.URL, "test-key", "tenant-a", created.ID)
@@ -81,9 +82,56 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 			if loaded.Status != domain.RunStatusSucceeded || loaded.Result == nil || len(loaded.Result.Artifacts) != 1 {
 				t.Fatalf("unexpected completed run: %+v", loaded)
 			}
+			completed = loaded
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if !completed.Status.Terminal() {
+		t.Fatal("run did not complete")
+	}
+	artifact := completed.Result.Artifacts[0]
+	stored, _, err := artifactStore.Open(context.Background(), completed.ID, artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := io.ReadAll(stored)
+	_ = stored.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+completed.ID+"/artifacts/"+artifact.ID, nil)
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/json" || resp.Header.Get("ETag") != `"sha256:`+artifact.SHA256+`"` || int64(len(got)) != artifact.SizeBytes || !bytes.Equal(got, want) {
+		t.Fatalf("artifact download status=%d content-type=%q etag=%q size=%d want-size=%d body-match=%v", resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("ETag"), len(got), artifact.SizeBytes, bytes.Equal(got, want))
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+completed.ID+"/artifacts/"+artifact.ID, nil)
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-b")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTenantBody, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var failure errorResponse
+	if resp.StatusCode != http.StatusNotFound || bytes.Equal(otherTenantBody, want) || json.Unmarshal(otherTenantBody, &failure) != nil || failure.Error.Code != "not_found" {
+		t.Fatalf("cross-tenant artifact response status=%d body=%s", resp.StatusCode, otherTenantBody)
 	}
 
 	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+created.ID, nil)
@@ -168,4 +216,128 @@ func TestReadinessDefaultsToNotReady(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("nil readiness status=%d body=%s", response.Code, response.Body.String())
 	}
+}
+
+type blockingCancelExecutor struct {
+	started        chan struct{}
+	cancelObserved chan struct{}
+	release        chan struct{}
+}
+
+func (e *blockingCancelExecutor) Name() string { return "blocking-cancel" }
+
+func (e *blockingCancelExecutor) Execute(ctx context.Context, _ domain.ExecutionRequest) (domain.ExecutionResult, error) {
+	close(e.started)
+	<-ctx.Done()
+	close(e.cancelObserved)
+	<-e.release
+	return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: domain.RunResult{Provenance: &domain.ExecutionProvenance{
+		DaemonRunID: "daemon-http-canceled",
+		SandboxID:   "sandbox-http-canceled",
+		Status:      "canceled",
+	}}}, ctx.Err()
+}
+
+func TestHTTPCancelRunStatusReflectsCancellationProgress(t *testing.T) {
+	agentCatalog, err := catalog.Load("../../configs/agents.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactStore, err := artifacts.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHarness := func(runtime *blockingCancelExecutor) (*app.Service, http.Handler) {
+		metrics := observability.NewMetrics()
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		service := app.New(app.Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, memorystore.New(), agentCatalog, policy.New(), runtime, prompt.New(), metrics, logger)
+		return service, New(Config{APIKey: "test-key", RateLimitPerMinute: 1000}, service, artifactStore, metrics, logger).Handler()
+	}
+	cancel := func(t *testing.T, handler http.Handler, runID string) (int, domain.Run) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/v1/runs/"+runID+"/cancel", bytes.NewBufferString(`{"actor":"tester","reason":"stop"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-API-Key", "test-key")
+		request.Header.Set("X-Tenant-ID", "tenant")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var run domain.Run
+		if err := json.Unmarshal(response.Body.Bytes(), &run); err != nil {
+			t.Fatalf("decode cancellation response: %v body=%s", err, response.Body.String())
+		}
+		return response.Code, run
+	}
+	get := func(t *testing.T, handler http.Handler, runID string) domain.Run {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/v1/runs/"+runID, nil)
+		request.Header.Set("X-API-Key", "test-key")
+		request.Header.Set("X-Tenant-ID", "tenant")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("get run status=%d body=%s", response.Code, response.Body.String())
+		}
+		var run domain.Run
+		if err := json.Unmarshal(response.Body.Bytes(), &run); err != nil {
+			t.Fatalf("decode get run response: %v body=%s", err, response.Body.String())
+		}
+		return run
+	}
+
+	t.Run("running", func(t *testing.T) {
+		runtime := &blockingCancelExecutor{started: make(chan struct{}), cancelObserved: make(chan struct{}), release: make(chan struct{})}
+		service, handler := newHarness(runtime)
+		if err := service.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer service.Close()
+		defer close(runtime.release)
+		run, _, err := service.CreateRun(context.Background(), "event-triage", domain.CreateRunRequest{RequestID: "http-cancel-running", Mode: "triage", Scope: domain.Scope{TenantID: "tenant"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-runtime.started:
+		case <-time.After(time.Second):
+			t.Fatal("executor did not start")
+		}
+		status, updated := cancel(t, handler, run.ID)
+		if status != http.StatusAccepted || updated.Status != domain.RunStatusRunning {
+			t.Fatalf("running cancel status=%d run_status=%s", status, updated.Status)
+		}
+		select {
+		case <-runtime.cancelObserved:
+		case <-time.After(time.Second):
+			t.Fatal("executor did not observe cancellation")
+		}
+		runtime.release <- struct{}{}
+		deadline := time.Now().Add(time.Second)
+		for {
+			completed := get(t, handler, run.ID)
+			if completed.Status.Terminal() {
+				if completed.Status != domain.RunStatusCancelled || completed.Result == nil || completed.Result.ErrorCode != "executor_cancelled" || completed.Result.Provenance == nil || completed.Result.Provenance.DaemonRunID != "daemon-http-canceled" || completed.Result.Provenance.SandboxID != "sandbox-http-canceled" || completed.Result.Provenance.Status != "canceled" {
+					t.Fatalf("terminal cancellation result was not preserved: %+v", completed)
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("run did not become terminal after cancellation")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	})
+
+	t.Run("queued", func(t *testing.T) {
+		runtime := &blockingCancelExecutor{started: make(chan struct{}), cancelObserved: make(chan struct{}), release: make(chan struct{})}
+		service, handler := newHarness(runtime)
+		defer service.Close()
+		run, _, err := service.CreateRun(context.Background(), "event-triage", domain.CreateRunRequest{RequestID: "http-cancel-queued", Mode: "triage", Scope: domain.Scope{TenantID: "tenant"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, updated := cancel(t, handler, run.ID)
+		if status != http.StatusOK || updated.Status != domain.RunStatusCancelled {
+			t.Fatalf("queued cancel status=%d run_status=%s", status, updated.Status)
+		}
+	})
 }

@@ -1,0 +1,215 @@
+{
+  "schema": "sas103-fixtures.v1",
+  "fixtures": [
+    {
+      "agent_id": "traffic-analysis",
+      "case_id": "sas103-traffic-analysis",
+      "request": {
+        "request_id": "__SAS103_REQUEST_ID__",
+        "case_id": "sas103-traffic-analysis",
+        "mode": "analyze",
+        "inputs": [
+          {
+            "type": "json",
+            "uri": "case://sas103/traffic-analysis/fixture",
+            "sha256": "c7e7ae3601bd0644dd840a6b3cd609cb6852db73f8c774197c02bb042c05d886",
+            "media_type": "application/json",
+            "metadata": {"synthetic": "true", "data_availability": "none"}
+          }
+        ],
+        "scope": {
+          "tenant_id": "__SAS103_TENANT__"
+        },
+        "policy": {
+          "network_access": "deny"
+        },
+        "output": {
+          "formats": ["json"]
+        }
+      },
+      "fixture": {
+        "synthetic": true,
+        "kind": "traffic-observation",
+        "records": [],
+        "data_availability": "none"
+      },
+      "fixture_sha256": "c7e7ae3601bd0644dd840a6b3cd609cb6852db73f8c774197c02bb042c05d886",
+      "expected_protocol": "security-agent-suite.traffic-analysis.v1",
+      "expected_output_status": "insufficient_evidence",
+      "schema_path": "agents/traffic-analysis/output.schema.json",
+      "declared_capsets": ["traffic-readonly", "security-evidence", "threat-intel-readonly", "asset-readonly"],
+      "forbidden_capability": {
+        "method": "calculator.v1.CalculatorService/Add",
+        "capset": "dev"
+      }
+    },
+    {
+      "agent_id": "event-triage",
+      "case_id": "sas103-event-triage",
+      "request": {
+        "request_id": "__SAS103_REQUEST_ID__",
+        "case_id": "sas103-event-triage",
+        "mode": "triage",
+        "inputs": [
+          {
+            "type": "json",
+            "uri": "case://sas103/event-triage/fixture",
+            "sha256": "d9c635378da2336c0b05e5202bfa872add0663902d3fd36cd56af1aeb87311d6",
+            "media_type": "application/json",
+            "metadata": {"synthetic": "true", "data_availability": "none"}
+          }
+        ],
+        "scope": {
+          "tenant_id": "__SAS103_TENANT__"
+        },
+        "policy": {
+          "network_access": "deny"
+        },
+        "output": {
+          "formats": ["json"]
+        }
+      },
+      "fixture": {
+        "synthetic": true,
+        "kind": "alert-observation",
+        "records": [],
+        "data_availability": "none"
+      },
+      "fixture_sha256": "d9c635378da2336c0b05e5202bfa872add0663902d3fd36cd56af1aeb87311d6",
+      "expected_protocol": "security-agent-suite.event-triage.v1",
+      "expected_output_status": "insufficient_evidence",
+      "schema_path": "agents/event-triage/output.schema.json",
+      "declared_capsets": ["alert-readonly", "asset-readonly", "endpoint-readonly", "security-evidence", "threat-intel-readonly"],
+      "forbidden_capability": {
+        "method": "calculator.v1.CalculatorService/Add",
+        "capset": "dev"
+      }
+    },
+    {
+      "agent_id": "attack-path-validation",
+      "case_id": "sas103-attack-path-validation",
+      "request": {
+        "request_id": "__SAS103_REQUEST_ID__",
+        "case_id": "sas103-attack-path-validation",
+        "mode": "assess",
+        "inputs": [
+          {
+            "type": "json",
+            "uri": "case://sas103/attack-path-validation/fixture",
+            "sha256": "1b3e2c488ba79cf9d50a1eb7f0a4c66bc93bef3083547b90740c85e944d4a095",
+            "media_type": "application/json",
+            "metadata": {"synthetic": "true", "data_availability": "none"}
+          }
+        ],
+        "scope": {
+          "tenant_id": "__SAS103_TENANT__"
+        },
+        "policy": {
+          "network_access": "deny"
+        },
+        "output": {
+          "formats": ["json"]
+        }
+      },
+      "fixture": {
+        "synthetic": true,
+        "kind": "attack-path-assessment",
+        "records": [],
+        "data_availability": "none"
+      },
+      "fixture_sha256": "1b3e2c488ba79cf9d50a1eb7f0a4c66bc93bef3083547b90740c85e944d4a095",
+      "expected_protocol": "security-agent-suite.attack-path-validation.v1",
+      "expected_output_status": "insufficient_evidence",
+      "schema_path": "agents/attack-path-validation/output.schema.json",
+      "declared_capsets": ["asset-readonly", "exposure-readonly", "vulnerability-readonly", "security-evidence", "attack-validation-gated"],
+      "forbidden_capability": {
+        "method": "calculator.v1.CalculatorService/Add",
+        "capset": "dev"
+      }
+    },
+    {
+      "agent_id": "compliance-query",
+      "case_id": "sas103-compliance-query",
+      "request": {
+        "request_id": "__SAS103_REQUEST_ID__",
+        "case_id": "sas103-compliance-query",
+        "mode": "query",
+        "inputs": [
+          {
+            "type": "json",
+            "uri": "case://sas103/compliance-query/fixture",
+            "sha256": "d5a2ac0a035bf24c3b2f53049b665b45a5f75500d2205e78ca212c42b532271c",
+            "media_type": "application/json",
+            "metadata": {"synthetic": "true", "data_availability": "none"}
+          }
+        ],
+        "scope": {
+          "tenant_id": "__SAS103_TENANT__"
+        },
+        "policy": {
+          "network_access": "deny"
+        },
+        "output": {
+          "formats": ["json"]
+        }
+      },
+      "fixture": {
+        "synthetic": true,
+        "kind": "compliance-question",
+        "records": [],
+        "data_availability": "none"
+      },
+      "fixture_sha256": "d5a2ac0a035bf24c3b2f53049b665b45a5f75500d2205e78ca212c42b532271c",
+      "expected_protocol": "security-agent-suite.compliance-query.v1",
+      "expected_output_status": "insufficient_basis",
+      "schema_path": "agents/compliance-query/output.schema.json",
+      "declared_capsets": ["compliance-readonly", "customer-evidence-readonly", "security-evidence"],
+      "forbidden_capability": {
+        "method": "calculator.v1.CalculatorService/Add",
+        "capset": "dev"
+      }
+    },
+    {
+      "agent_id": "security-report",
+      "case_id": "sas103-security-report",
+      "request": {
+        "request_id": "__SAS103_REQUEST_ID__",
+        "case_id": "sas103-security-report",
+        "mode": "weekly",
+        "inputs": [
+          {
+            "type": "json",
+            "uri": "case://sas103/security-report/fixture",
+            "sha256": "4ef5229f2d28f29955666d0e68b8ede382cb0f944246f758d1c3d8989894dc53",
+            "media_type": "application/json",
+            "metadata": {"synthetic": "true", "data_availability": "none"}
+          }
+        ],
+        "scope": {
+          "tenant_id": "__SAS103_TENANT__"
+        },
+        "policy": {
+          "network_access": "deny"
+        },
+        "output": {
+          "formats": ["json"]
+        }
+      },
+      "fixture": {
+        "synthetic": true,
+        "kind": "report-input",
+        "records": [],
+        "data_availability": "none"
+      },
+      "fixture_sha256": "4ef5229f2d28f29955666d0e68b8ede382cb0f944246f758d1c3d8989894dc53",
+      "expected_protocol": "security-agent-suite.security-report.v1",
+      "expected_output_status": "insufficient_data",
+      "schema_path": "agents/security-report/output.schema.json",
+      "declared_capsets": ["evidence-readonly", "report-render", "template-readonly"],
+      "forbidden_capability": {
+        "method": "calculator.v1.CalculatorService/Add",
+        "capset": "dev"
+      }
+    }
+  ]
+}

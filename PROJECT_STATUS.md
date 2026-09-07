@@ -54,8 +54,10 @@ The target evidence above used only the dedicated non-production synthetic probe
 - File storage is single-node development storage, not HA storage.
 - Kubernetes manifests are a production migration starting point, not a completed production deployment.
 
-## Next hard gate
+## SAS-103 status and hard gate
 
-Complete **SAS-103**: run the five Agents in real Sandboxes and establish the required smoke evidence. Do not start implementing the five domain agents against production data until the later gates cover their real execution behavior, structured output validation, cancellation, timeout, provenance, and capset isolation.
+SAS-103 harness and offline work is in progress. Live SAS-103 is **not complete**: live acceptance evidence is absent; Issue #9 remains open. The harness can produce a structural raw index for the required 100 normal runs and 10 lifecycle checks, but `--controls` is currently blocked with `failure: "controls_unverified"`; `verify_report` raises `controls_unverified` rather than returning counts until an external trusted attestation mechanism exists.
+
+The remaining gates are 100/100 normal runs, 10 lifecycle checks, a fresh operator-authorized credential for a non-production provider, and independently executed, human-reviewed real non-production evidence for exactly 20 external controls (four control kinds across five Agents) covered by an existing governed signed/independent attestation and build provenance. Missing authoritative actual model/runtime-version provenance for each run and a missing authoritative no-side-effect/idempotency signal for transient retries are additional blockers; configured values are inputs and must not be called proof. The deliberate pinned-provider/`finalTextSource=provider_message` fail-closed gate may keep the live pass rate below 99% and is not acceptance evidence. Hashes, reviewer metadata, timestamps, and projected exchanges are not authentication. Until all are available, do not represent SAS-103 as complete or use customer data.
 
 See [`docs/roadmap/implementation-plan.md`](docs/roadmap/implementation-plan.md) and [`planning/backlog.tsv`](planning/backlog.tsv).

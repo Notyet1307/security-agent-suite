@@ -251,7 +251,11 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	status := http.StatusOK
+	if !run.Status.Terminal() {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, run)
 }
 
 func (s *Server) decode(w http.ResponseWriter, r *http.Request, target any) error {

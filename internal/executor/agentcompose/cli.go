@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -19,6 +20,13 @@ const (
 	maxCapturedOutput     = 8 << 20
 	outputTruncatedCode   = "agent_compose_output_truncated"
 	outputTruncatedMarker = "[agent-compose output truncated]"
+	exitCodeUnavailable   = 3
+
+	// agent-compose handles SIGINT with signal.NotifyContext and asks its daemon
+	// to stop the observed run. Its deferred StopRun uses an unbounded background
+	// context, so WaitDelay supplies a conservative local five-second bound; the
+	// asserted runtime is Linux/arm64.
+	agentComposeCancelGrace = 5 * time.Second
 )
 
 type Config struct {
@@ -210,7 +218,16 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	if timeout <= 0 {
 		timeout = e.cfg.Timeout
 	}
-	args := []string{"--json", "--timeout", timeout.String()}
+	execCtx := ctx
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	// The Go context is the authoritative deadline. A nonzero CLI RPC timeout
+	// can race that deadline and prevent agent-compose's cancellation defer from
+	// requesting RunService.StopRun.
+	args := []string{"--json", "--timeout", "0"}
 	if e.cfg.Host != "" {
 		args = append(args, "--host", e.cfg.Host)
 	}
@@ -224,7 +241,17 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		args = append(args, "--rm")
 	}
 
-	cmd := exec.CommandContext(ctx, e.cfg.Binary, args...)
+	cmd := exec.CommandContext(execCtx, e.cfg.Binary, args...)
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := cmd.Process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		return nil
+	}
+	cmd.WaitDelay = agentComposeCancelGrace
 	var stdout, stderr cappedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -237,6 +264,7 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		envelope, envelopeParseErr = decodeRuntimeEnvelope(stdout.Bytes())
 	}
 	truncated := stdout.truncated || stderr.truncated
+	trustedProviderOutput := parseErr == nil && knownProvider(runtimeResult.Provider) && runtimeResult.FinalTextSource == "provider_message"
 	if !truncated && envelopeParseErr == nil && (parseErr == nil || runtimeFailureEnvelope(envelope)) {
 		result.Provenance = executionProvenance(envelope, runtimeResult)
 	}
@@ -266,7 +294,7 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		}
 		artifactsOut = append(artifactsOut, artifact)
 	}
-	if !truncated && parseErr == nil {
+	if !truncated && trustedProviderOutput {
 		result.RawOutput = json.RawMessage(runtimeResult.FinalText)
 		// Controlled provider result: exact finalText is also the business RawOutput.
 		finalArtifact, putErr := e.artifacts.Put(context.WithoutCancel(ctx), request.Run.ID, "agent-compose-final-output.json", "application/json", redactPrompt([]byte(runtimeResult.FinalText), request.Prompt), finished)
@@ -276,8 +304,19 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		artifactsOut = append(artifactsOut, finalArtifact)
 	}
 	result.Artifacts = artifactsOut
-	if err != nil && (errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded)) {
-		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, ctx.Err()
+	if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, execCtx.Err()
+	}
+	if errors.Is(execCtx.Err(), context.Canceled) {
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, execCtx.Err()
+	}
+	if err != nil && !truncated && envelopeParseErr == nil && runtimeStatus(envelope) == domain.RunStatusCancelled {
+		result.ErrorCode = "agent_compose_cancelled"
+		result.ErrorMessage = domain.BoundedText(envelope.Error, domain.MaxErrorMessageBytes)
+		if result.ErrorMessage == "" {
+			result.ErrorMessage = "agent-compose runtime canceled"
+		}
+		return domain.ExecutionResult{Status: domain.RunStatusCancelled, Result: result}, nil
 	}
 	if truncated {
 		result.ErrorCode = outputTruncatedCode
@@ -289,6 +328,9 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			result.ErrorCode = "agent_compose_exit"
+			if exitErr.ExitCode() == exitCodeUnavailable {
+				result.ErrorCode = "agent_compose_unavailable"
+			}
 			result.ErrorMessage = domain.BoundedText(strings.TrimSpace(stderr.String()), domain.MaxErrorMessageBytes)
 			if result.ErrorMessage == "" {
 				result.ErrorMessage = domain.BoundedText(exitErr.Error(), domain.MaxErrorMessageBytes)
@@ -311,6 +353,14 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 			if runtime == domain.RunStatusPartial {
 				return domain.ExecutionResult{Status: domain.RunStatusPartial, Result: result}, nil
 			}
+			if runtime == domain.RunStatusCancelled {
+				result.ErrorCode = "agent_compose_cancelled"
+				result.ErrorMessage = domain.BoundedText(envelope.Error, domain.MaxErrorMessageBytes)
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = "agent-compose runtime canceled"
+				}
+				return domain.ExecutionResult{Status: domain.RunStatusCancelled, Result: result}, nil
+			}
 		}
 		// Let the existing validation Gate classify malformed/missing provider output.
 		return domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: result}, nil
@@ -323,14 +373,37 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 			result.ErrorMessage = "agent-compose runtime failed"
 		}
 	}
+	if status == domain.RunStatusCancelled {
+		result.ErrorCode = "agent_compose_cancelled"
+		result.ErrorMessage = domain.BoundedText(envelope.Error, domain.MaxErrorMessageBytes)
+		if result.ErrorMessage == "" {
+			result.ErrorMessage = "agent-compose runtime canceled"
+		}
+	}
 	return domain.ExecutionResult{Status: status, Result: result}, nil
+
+}
+
+func knownProvider(provider string) bool {
+	switch provider {
+	case "codex", "claude", "gemini", "opencode", "pi", "dsh":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeStatus(envelope AgentComposeRunEnvelope) domain.RunStatus {
+	status := strings.ToLower(strings.TrimSpace(envelope.Status))
+	// A canceled upstream run can retain the cell's nonzero exit code and the
+	// cancellation cause in error; its terminal status is authoritative.
+	if status == "canceled" || status == "cancelled" {
+		return domain.RunStatusCancelled
+	}
 	if envelope.ExitCode != 0 || strings.TrimSpace(envelope.Error) != "" {
 		return domain.RunStatusFailed
 	}
-	switch strings.ToLower(strings.TrimSpace(envelope.Status)) {
+	switch status {
 	case "completed", "succeeded", "success":
 		return domain.RunStatusSucceeded
 	case "partial":
@@ -342,7 +415,7 @@ func runtimeStatus(envelope AgentComposeRunEnvelope) domain.RunStatus {
 
 func runtimeFailureEnvelope(envelope AgentComposeRunEnvelope) bool {
 	status := strings.ToLower(strings.TrimSpace(envelope.Status))
-	if status == "partial" {
+	if status == "partial" || status == "canceled" || status == "cancelled" {
 		return true
 	}
 	return status == "failed" || status == "failure" || status == "error" || envelope.ExitCode != 0 || strings.TrimSpace(envelope.Error) != ""

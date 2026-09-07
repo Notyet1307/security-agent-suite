@@ -164,13 +164,15 @@ make run
 Go 网关会执行等价命令：
 
 ```bash
-agent-compose --json --timeout 35m \
+agent-compose --json --timeout 0 \
   --host http://127.0.0.1:7410 \
   -f ./agent-compose.yml \
   run <agent-id> \
   --prompt '<structured-task-envelope>' \
   --rm
 ```
+`--timeout 0` 只禁用 CLI HTTP client timeout；正常 Run 的 deadline 由 Go context 根据 agent 的 `default_timeout` 确定，并以 `SAS_RUN_TIMEOUT` 作为兜底和上限，再按每个 Run 的 `max_duration` 缩短。`SAS_AGENT_COMPOSE_TIMEOUT` 仅在 executor 未收到有效的 `request.Timeout` 时作为后备值，不能覆盖上述 deadline；CLI 保持 timeout 为 0，以便 SIGINT cancellation defer 可以运行。
+
 
 外部进程输出会原样保存为运行产物；业务侧只消费标准化的 Run、Evidence、Finding 和 Artifact 契约。
 
@@ -186,8 +188,12 @@ agent-compose --json --timeout 35m \
 | `POST` | `/v1/agents/{agent_id}/runs` | 创建运行 |
 | `GET` | `/v1/runs/{run_id}` | 查询运行和结果 |
 | `GET` | `/v1/runs/{run_id}/events` | 查询审计事件 |
+| `GET` | `/v1/runs/{run_id}/artifacts` | 查询运行产物元数据 |
+| `GET` | `/v1/runs/{run_id}/artifacts/{artifact_id}` | 下载运行产物 |
 | `POST` | `/v1/runs/{run_id}/approve` | 审批高风险运行 |
 | `POST` | `/v1/runs/{run_id}/cancel` | 取消排队或运行中任务 |
+
+运行中取消的语义：API 请求取消先返回 `202`（仍在停止）；Go context 是权威，最终 Run 为 `cancelled` 且 `error_code=executor_cancelled`。只有 Go context 尚未到期而 runtime envelope 自身报告 `canceled`/`cancelled` 时才使用 `agent_compose_cancelled`；成功解码的 runtime provenance 仍保留。
 
 完整定义见 [OpenAPI](openapi/openapi.yaml)。
 

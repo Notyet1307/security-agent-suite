@@ -137,9 +137,12 @@ preflight policy
                           ▼             ▼             ▼
                       succeeded       partial        failed
 
-任意非终态 ── cancel ──▶ cancelled
+queued/waiting_approval/validating ── cancel ──▶ cancelled（立即）
+running ── cancel request ──▶ running ── executor acknowledgement ──▶ cancelled
 服务重启时：running/validating 标记 failed；queued 重新入队。
 ```
+运行中 API 取消先返回 `202`（停止中）；Go context 是权威，最终 Run 为 `cancelled` 且 `error_code=executor_cancelled`。只有 Go context 尚未到期而 runtime envelope 自身报告 `canceled`/`cancelled` 时才使用 `agent_compose_cancelled`；成功解码的 runtime provenance 仍保留。
+
 
 状态机由 Go 实现，模型无权修改状态。
 

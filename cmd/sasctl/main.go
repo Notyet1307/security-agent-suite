@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"github.com/Notyet1307/security-agent-suite/internal/doctor"
+	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
 
 type doctorRunner func(context.Context, doctor.Config) doctor.Report
+
+const maxValidationOutputBytes = 8 << 20
 
 type client struct {
 	baseURL   string
@@ -66,6 +69,8 @@ func run(args []string, stdout, stderr io.Writer, doctorRun doctorRunner) int {
 		err = c.listRuns(args[1:])
 	case "run":
 		err = c.createRun(args[1:])
+	case "validate-output":
+		err = c.validateOutput(args[1:])
 	case "get":
 		if len(args) != 2 {
 			err = errors.New("usage: sasctl [global flags] get <run-id>")
@@ -101,6 +106,7 @@ func writeUsage(w io.Writer) {
   sasctl [global flags] agents
   sasctl [global flags] list [--agent ID] [--status STATUS] [--limit N]
   sasctl [global flags] run --agent ID --file request.json
+  sasctl [global flags] validate-output --agent ID --file output.json
   sasctl [global flags] get RUN_ID
   sasctl [global flags] events RUN_ID
   sasctl [global flags] approve RUN_ID --approval-id ID --actor NAME --reason TEXT
@@ -145,6 +151,50 @@ func (c *client) createRun(args []string) error {
 		return err
 	}
 	return c.print("POST", "/v1/agents/"+*agent+"/runs", data)
+}
+
+func (c *client) validateOutput(args []string) error {
+	flags := c.newFlagSet("validate-output")
+	agent := flags.String("agent", "", "agent id")
+	filePath := flags.String("file", "", "agent output JSON file")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *agent == "" || *filePath == "" {
+		return errors.New("--agent and --file are required")
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: sasctl validate-output --agent ID --file PATH")
+	}
+	file, err := openValidationOutput(*filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("agent output must be a regular file")
+	}
+	if info.Size() > maxValidationOutputBytes {
+		return fmt.Errorf("agent output exceeds %d bytes", maxValidationOutputBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxValidationOutputBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxValidationOutputBytes {
+		return fmt.Errorf("agent output exceeds %d bytes", maxValidationOutputBytes)
+	}
+	if _, err := validation.Parse(*agent, data); err != nil {
+		return err
+	}
+	return json.NewEncoder(c.stdout).Encode(struct {
+		AgentID string `json:"agent_id"`
+		Valid   bool   `json:"valid"`
+	}{AgentID: *agent, Valid: true})
 }
 
 func (c *client) listRuns(args []string) error {
