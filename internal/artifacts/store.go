@@ -179,37 +179,60 @@ func (s *Store) Get(ctx context.Context, runID, artifactID string) (domain.Artif
 	runID = filepath.Base(rawRunID)
 	rawArtifactID := strings.TrimSpace(artifactID)
 	artifactID = filepath.Base(rawArtifactID)
-	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) || rawArtifactID == "" || artifactID != rawArtifactID || strings.ContainsAny(rawArtifactID, `/\`) {
+	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\\`) || rawArtifactID == "" || artifactID != rawArtifactID || strings.ContainsAny(rawArtifactID, `/\\`) {
 		return domain.ArtifactRef{}, fmt.Errorf("%w: invalid artifact namespace", domain.ErrInvalidRequest)
 	}
-	path := filepath.Join(s.root, runID, metadataDirectory, artifactID+".json")
-	file, err := os.Open(path)
+	metadataDir := filepath.Join(s.root, runID, metadataDirectory)
+	entries, err := os.ReadDir(metadataDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return domain.ArtifactRef{}, domain.ErrNotFound
 		}
 		return domain.ArtifactRef{}, err
 	}
-	defer file.Close()
-	info, err := file.Stat()
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return domain.ArtifactRef{}, err
+		}
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		ref, err := readMetadata(filepath.Join(metadataDir, entry.Name()), runID)
+		if err != nil {
+			return domain.ArtifactRef{}, err
+		}
+		if ref.ID == artifactID {
+			return ref, nil
+		}
+	}
+	return domain.ArtifactRef{}, domain.ErrNotFound
+}
+
+func readMetadata(path, runID string) (domain.ArtifactRef, error) {
+	entry, err := os.Lstat(path)
 	if err != nil {
 		return domain.ArtifactRef{}, err
 	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 64<<10 {
+	if entry.Mode()&os.ModeSymlink != 0 || !entry.Mode().IsRegular() || entry.Size() <= 0 || entry.Size() > 64<<10 {
 		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata file")
 	}
+	file, err := os.Open(path)
+	if err != nil {
+		return domain.ArtifactRef{}, err
+	}
+	defer file.Close()
 	var ref domain.ArtifactRef
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ref); err != nil {
 		return domain.ArtifactRef{}, fmt.Errorf("decode artifact metadata: %w", err)
 	}
-	if ref.ID != artifactID || ref.Name == "" || ref.MediaType == "" || ref.SHA256 == "" || ref.SizeBytes <= 0 || ref.CreatedAt.IsZero() {
+	if filepath.Base(ref.ID) != ref.ID || strings.ContainsAny(ref.ID, `/\\`) || ref.ID == "" || ref.Name == "" || ref.MediaType == "" || ref.SHA256 == "" || ref.SizeBytes <= 0 || ref.CreatedAt.IsZero() {
 		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata")
 	}
 	prefix := "artifact://runs/" + runID + "/"
 	storedName := strings.TrimPrefix(ref.URI, prefix)
-	if !strings.HasPrefix(ref.URI, prefix) || storedName == "" || filepath.Base(storedName) != storedName {
+	if !strings.HasPrefix(ref.URI, prefix) || storedName == "" || filepath.Base(storedName) != storedName || strings.ContainsAny(storedName, `/\\`) {
 		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata URI")
 	}
 	return ref, nil
@@ -225,7 +248,8 @@ func (s *Store) List(ctx context.Context, runID string) ([]domain.ArtifactRef, e
 	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) {
 		return nil, fmt.Errorf("%w: invalid run id", domain.ErrInvalidRequest)
 	}
-	entries, err := os.ReadDir(filepath.Join(s.root, runID, metadataDirectory))
+	metadataDir := filepath.Join(s.root, runID, metadataDirectory)
+	entries, err := os.ReadDir(metadataDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []domain.ArtifactRef{}, nil
@@ -240,7 +264,7 @@ func (s *Store) List(ctx context.Context, runID string) ([]domain.ArtifactRef, e
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		ref, err := s.Get(ctx, runID, strings.TrimSuffix(entry.Name(), ".json"))
+		ref, err := readMetadata(filepath.Join(metadataDir, entry.Name()), runID)
 		if err != nil {
 			return nil, err
 		}
