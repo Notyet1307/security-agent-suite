@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stored Evidence",
+  "allOf": [
+    {
+      "$ref": "evidence.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "source_uri",
+        "sha256",
+        "tool",
+        "tool_version",
+        "parameters",
+        "collected_at"
+      ]
+    }
+  ]
+}

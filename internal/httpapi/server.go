@@ -14,6 +14,7 @@ import (
 	"github.com/Notyet1307/security-agent-suite/internal/app"
 	"github.com/Notyet1307/security-agent-suite/internal/artifacts"
 	"github.com/Notyet1307/security-agent-suite/internal/domain"
+	"github.com/Notyet1307/security-agent-suite/internal/id"
 	"github.com/Notyet1307/security-agent-suite/internal/observability"
 	"github.com/Notyet1307/security-agent-suite/internal/store"
 )
@@ -31,18 +32,40 @@ type Server struct {
 	cfg       Config
 	service   *app.Service
 	artifacts *artifacts.Store
+	evidence  store.EvidenceStore
 	metrics   *observability.Metrics
 	logger    *slog.Logger
 }
 
-func New(cfg Config, service *app.Service, artifactStore *artifacts.Store, metrics *observability.Metrics, logger *slog.Logger) *Server {
+type evidenceResponse struct {
+	domain.EvidenceRef
+	Parameters map[string]string `json:"parameters"`
+}
+
+func evidenceResponseOf(ref domain.EvidenceRef) evidenceResponse {
+	if ref.Parameters == nil {
+		ref.Parameters = map[string]string{}
+	}
+	return evidenceResponse{EvidenceRef: ref, Parameters: ref.Parameters}
+}
+
+func evidenceResponsesOf(refs []domain.EvidenceRef) []evidenceResponse {
+	out := make([]evidenceResponse, len(refs))
+	for i, ref := range refs {
+		out[i] = evidenceResponseOf(ref)
+	}
+	return out
+}
+
+// New constructs the HTTP transport with its persistence dependencies.
+func New(cfg Config, service *app.Service, artifactStore *artifacts.Store, metrics *observability.Metrics, logger *slog.Logger, evidenceStore store.EvidenceStore) *Server {
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = 1 << 20
 	}
 	if cfg.RateLimitPerMinute <= 0 {
 		cfg.RateLimitPerMinute = 120
 	}
-	return &Server{cfg: cfg, service: service, artifacts: artifactStore, metrics: metrics, logger: logger}
+	return &Server{cfg: cfg, service: service, artifacts: artifactStore, evidence: evidenceStore, metrics: metrics, logger: logger}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -57,6 +80,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.getRunEvents)
+	mux.HandleFunc("GET /v1/runs/{runID}/evidence", s.getRunEvidence)
+	mux.HandleFunc("POST /v1/runs/{runID}/evidence", s.appendEvidence)
+	mux.HandleFunc("GET /v1/runs/{runID}/evidence/{evidenceID}", s.getEvidence)
 	mux.HandleFunc("GET /v1/runs/{runID}/artifacts", s.getRunArtifacts)
 	mux.HandleFunc("POST /v1/runs/{runID}/artifacts", s.uploadArtifact)
 	mux.HandleFunc("GET /v1/runs/{runID}/artifacts/{artifactID}", s.downloadArtifact)
@@ -173,6 +199,76 @@ func (s *Server) getRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run_id": run.ID, "events": run.Events})
+}
+
+func (s *Server) appendEvidence(w http.ResponseWriter, r *http.Request) {
+	run, err := s.service.GetRun(r.Context(), tenantIDFromContext(r.Context()), r.PathValue("runID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if s.evidence == nil {
+		writeStatusError(w, r, http.StatusServiceUnavailable, "evidence_unavailable", "evidence store is not configured")
+		return
+	}
+	var ref domain.EvidenceRef
+	if err := s.decode(w, r, &ref); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(ref.ID) == "" {
+		ref.ID, err = id.New("evidence", time.Now())
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	if ref.CollectedAt.IsZero() {
+		ref.CollectedAt = time.Now().UTC()
+	}
+	stored, err := s.evidence.Append(r.Context(), tenantIDFromContext(r.Context()), run.ID, ref)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/runs/"+run.ID+"/evidence/"+stored.ID)
+	writeJSON(w, http.StatusCreated, evidenceResponseOf(stored))
+}
+
+func (s *Server) getRunEvidence(w http.ResponseWriter, r *http.Request) {
+	run, err := s.service.GetRun(r.Context(), tenantIDFromContext(r.Context()), r.PathValue("runID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if s.evidence == nil {
+		writeStatusError(w, r, http.StatusServiceUnavailable, "evidence_unavailable", "evidence store is not configured")
+		return
+	}
+	evidence, err := s.evidence.List(r.Context(), tenantIDFromContext(r.Context()), run.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run_id": run.ID, "evidence": evidenceResponsesOf(evidence)})
+}
+
+func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) {
+	run, err := s.service.GetRun(r.Context(), tenantIDFromContext(r.Context()), r.PathValue("runID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if s.evidence == nil {
+		writeStatusError(w, r, http.StatusServiceUnavailable, "evidence_unavailable", "evidence store is not configured")
+		return
+	}
+	evidence, err := s.evidence.Get(r.Context(), tenantIDFromContext(r.Context()), run.ID, r.PathValue("evidenceID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, evidenceResponseOf(evidence))
 }
 
 func (s *Server) getRunArtifacts(w http.ResponseWriter, r *http.Request) {

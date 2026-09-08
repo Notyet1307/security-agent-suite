@@ -126,7 +126,7 @@ func TestGateRejectsUntrustedHighFinding(t *testing.T) {
 }
 
 func TestGateUsesTrustedExecutorEvidence(t *testing.T) {
-	trusted := domain.EvidenceRef{ID: "model-e1", Type: "trusted-log", SourceURI: "artifact://trusted/e1"}
+	trusted := domain.EvidenceRef{ID: "model-e1", Type: "trusted-log", SourceURI: "artifact://trusted/e1", Parameters: map[string]string{"limit": "10"}, ArtifactIDs: []string{"art-1"}}
 	raw := strings.Replace(gateEvidenceClaimOutput, `"evidence":[{"id":"model-e1","type":"log"}]`, `"evidence":[]`, 1)
 	got := Gate("event-triage", domain.ExecutionResult{
 		Status: domain.RunStatusSucceeded,
@@ -137,6 +137,11 @@ func TestGateUsesTrustedExecutorEvidence(t *testing.T) {
 	}
 	if got.Result.Evidence[0].Type != trusted.Type || got.Result.Evidence[0].SourceURI != trusted.SourceURI {
 		t.Fatalf("model evidence was promoted: %+v", got.Result.Evidence)
+	}
+	got.Result.Evidence[0].Parameters["limit"] = "changed"
+	got.Result.Evidence[0].ArtifactIDs[0] = "changed"
+	if trusted.Parameters["limit"] != "10" || trusted.ArtifactIDs[0] != "art-1" {
+		t.Fatalf("trusted evidence was not deep-copied: %+v", trusted)
 	}
 }
 
@@ -302,5 +307,16 @@ func TestParseRejectsInvalidEvidenceMetadata(t *testing.T) {
 		if _, err := Parse("event-triage", []byte(payload)); Code(err) != CodeContractInvalid {
 			t.Fatalf("%s: code=%q err=%v", name, Code(err), err)
 		}
+	}
+}
+
+func TestParsePreservesEvidenceStoreFields(t *testing.T) {
+	payload := `{"protocol":"security-agent-suite.event-triage.v1","status":"completed","summary":"ok","classification":"benign","severity":"informational","confidence":1,"hypotheses":[],"evidence":[{"id":"e1","type":"log","source_uri":"tool://collector/1","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","tool":"collector","tool_version":"1.0.0","parameters":{"limit":"10"},"artifact_ids":["art-1"],"collected_at":"2026-09-08T00:00:00Z","metadata":{"source":"fixture"}}],"findings":[],"recommended_actions":[],"limitations":[]}`
+	result, err := Parse("event-triage", []byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Evidence) != 1 || result.Evidence[0].ToolVersion != "1.0.0" || result.Evidence[0].Parameters["limit"] != "10" || result.Evidence[0].ArtifactIDs[0] != "art-1" {
+		t.Fatalf("parsed evidence=%+v", result.Evidence)
 	}
 }

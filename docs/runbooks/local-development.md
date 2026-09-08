@@ -42,6 +42,21 @@ curl --fail-with-body \
 
 回滚时先停止新的上传并保留 `SAS_ARTIFACT_DIR`，直到完成留存决定；旧版本不会读取 `.metadata` 注册表，因此仅由该上传 API 登记的 Artifact 在回滚后不可列出或下载，但原始文件仍保留。不要用 `make clean` 代替回滚。
 
+## Evidence 追加与查询
+
+Evidence 只能追加，不能更新或删除。请求至少提供来源、SHA-256、工具名称、版本和参数；服务端在缺失时生成 Evidence ID 和 `collected_at`。`artifact_ids` 如提供，必须引用同一 Run 下已登记的 Artifact：
+
+```sh
+curl --fail-with-body \
+  -H "X-API-Key: $SAS_API_KEY" \
+  -H "X-Tenant-ID: default" \
+  -H "Content-Type: application/json" \
+  --data '{"type":"tool-observation","source_uri":"tool://collector/1","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","tool":"collector","tool_version":"1.0.0","parameters":{"limit":"10"}}' \
+  "http://127.0.0.1:8080/v1/runs/$RUN_ID/evidence"
+```
+
+Evidence 记录保存在 `SAS_STATE_DIR/evidence` 的不可变文件中；同一 ID 的重复追加返回冲突，跨租户查询隐藏为 `404`。当前实现是单实例本地文件基线，不声称 PostgreSQL 事务、HA、防篡改审计或留存删除策略。
+
 ## agent-compose 模式
 
 1. 启动并配置 agent-compose daemon；

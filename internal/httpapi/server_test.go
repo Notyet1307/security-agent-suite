@@ -39,7 +39,7 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1024, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger).Handler())
+	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1024, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger, nil).Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/healthz")
@@ -268,11 +268,120 @@ func responseStatus(resp *http.Response) int {
 	return resp.StatusCode
 }
 
+func TestHTTPEvidenceAppendAndTenantIsolation(t *testing.T) {
+	agentCatalog, err := catalog.Load("../../configs/agents.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactStore, err := artifacts.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := memorystore.New()
+	run := domain.NewRun("run-http-evidence", "event-triage", "事件研判", domain.CreateRunRequest{RequestID: "request-http-evidence", Mode: "triage", Scope: domain.Scope{TenantID: "tenant-a"}}, domain.RunStatusQueued, time.Now())
+	if err := runs.Create(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := artifactStore.Put(context.Background(), run.ID, "source.json", "application/json", []byte(`{"event":true}`), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceStore, err := memorystore.NewEvidenceStore(runs, artifactStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.NewMetrics()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	service := app.New(app.Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, runs, agentCatalog, policy.New(), mockexecutor.New(artifactStore), prompt.New(), metrics, logger)
+	server := New(Config{APIKey: "test-key", MaxBodyBytes: 4096, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger, evidenceStore).Handler()
+
+	body, _ := json.Marshal(domain.EvidenceRef{Type: "tool-observation", SourceURI: artifact.URI, SHA256: artifact.SHA256, Tool: "collector", ToolVersion: "1.0.0", Parameters: map[string]string{"limit": "10"}, ArtifactIDs: []string{artifact.ID}})
+	request := httptest.NewRequest(http.MethodPost, "/v1/runs/"+run.ID+"/evidence", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-a")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("append status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created domain.EvidenceRef
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" || created.CollectedAt.IsZero() || created.ToolVersion != "1.0.0" || created.Parameters["limit"] != "10" {
+		t.Fatalf("unexpected created evidence: %+v", created)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/evidence", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-a")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	var listing struct {
+		RunID    string               `json:"run_id"`
+		Evidence []domain.EvidenceRef `json:"evidence"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &listing) != nil || listing.RunID != run.ID || len(listing.Evidence) != 1 {
+		t.Fatalf("list status=%d body=%s listing=%+v", response.Code, response.Body.String(), listing)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/evidence/"+created.ID, nil)
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-a")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	var fetched domain.EvidenceRef
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &fetched) != nil || fetched.ID != created.ID || fetched.SHA256 != artifact.SHA256 {
+		t.Fatalf("get evidence status=%d body=%s fetched=%+v", response.Code, response.Body.String(), fetched)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/evidence/"+created.ID, nil)
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-b")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant evidence status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	duplicateBody, _ := json.Marshal(created)
+	request = httptest.NewRequest(http.MethodPost, "/v1/runs/"+run.ID+"/evidence", bytes.NewReader(duplicateBody))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-a")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("duplicate evidence status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	invalidArtifact := []byte(`{"id":"e-invalid","type":"tool-observation","source_uri":"tool://collector/2","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","tool":"collector","tool_version":"1.0.0","parameters":{},"artifact_ids":["missing"]}`)
+	request = httptest.NewRequest(http.MethodPost, "/v1/runs/"+run.ID+"/evidence", bytes.NewReader(invalidArtifact))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-API-Key", "test-key")
+	request.Header.Set("X-Tenant-ID", "tenant-a")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid artifact status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestEvidenceResponseIncludesEmptyParameters(t *testing.T) {
+	data, err := json.Marshal(evidenceResponseOf(domain.EvidenceRef{ID: "e1", Type: "observation", SourceURI: "tool://collector", SHA256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", Tool: "collector", ToolVersion: "1", Parameters: map[string]string{}, CollectedAt: time.Now()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"parameters":{}`)) {
+		t.Fatalf("parameters omitted from response: %s", data)
+	}
+}
+
 func TestReadinessUsesInjectedState(t *testing.T) {
 	metrics := observability.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ready := false
-	handler := New(Config{Ready: func() bool { return ready }}, nil, nil, metrics, logger).Handler()
+	handler := New(Config{Ready: func() bool { return ready }}, nil, nil, metrics, logger, nil).Handler()
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	request.Header.Set("X-Request-ID", "readiness-test")
@@ -307,7 +416,7 @@ func TestReadinessUsesInjectedState(t *testing.T) {
 func TestReadinessDefaultsToNotReady(t *testing.T) {
 	metrics := observability.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(Config{}, nil, nil, metrics, logger).Handler()
+	handler := New(Config{}, nil, nil, metrics, logger, nil).Handler()
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if response.Code != http.StatusServiceUnavailable {
@@ -348,7 +457,7 @@ func TestHTTPCancelRunStatusReflectsCancellationProgress(t *testing.T) {
 		metrics := observability.NewMetrics()
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		service := app.New(app.Config{Workers: 1, QueueSize: 4, MaxRunTimeout: time.Minute}, memorystore.New(), agentCatalog, policy.New(), runtime, prompt.New(), metrics, logger)
-		return service, New(Config{APIKey: "test-key", RateLimitPerMinute: 1000}, service, artifactStore, metrics, logger).Handler()
+		return service, New(Config{APIKey: "test-key", RateLimitPerMinute: 1000}, service, artifactStore, metrics, logger, nil).Handler()
 	}
 	cancel := func(t *testing.T, handler http.Handler, runID string) (int, domain.Run) {
 		t.Helper()

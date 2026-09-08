@@ -255,7 +255,25 @@ func trustedEvidence(evidence []domain.EvidenceRef) []domain.EvidenceRef {
 	if evidence == nil {
 		return nil
 	}
-	return append([]domain.EvidenceRef(nil), evidence...)
+	out := make([]domain.EvidenceRef, len(evidence))
+	for i, ref := range evidence {
+		ref.ArtifactIDs = append([]string(nil), ref.ArtifactIDs...)
+		ref.Parameters = cloneEvidenceMap(ref.Parameters)
+		ref.Metadata = cloneEvidenceMap(ref.Metadata)
+		out[i] = ref
+	}
+	return out
+}
+
+func cloneEvidenceMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func trustedEvidenceIDs(evidence []domain.EvidenceRef) map[string]struct{} {
@@ -320,6 +338,24 @@ func evidence(root map[string]any) []domain.EvidenceRef {
 		}
 		if v, ok := obj["tool"].(string); ok {
 			ref.Tool = v
+		}
+		if v, ok := obj["tool_version"].(string); ok {
+			ref.ToolVersion = v
+		}
+		if v, ok := obj["parameters"].(map[string]any); ok {
+			ref.Parameters = map[string]string{}
+			for key, value := range v {
+				if text, ok := value.(string); ok {
+					ref.Parameters[key] = text
+				}
+			}
+		}
+		if v, ok := obj["artifact_ids"].([]any); ok {
+			for _, value := range v {
+				if text, ok := value.(string); ok {
+					ref.ArtifactIDs = append(ref.ArtifactIDs, text)
+				}
+			}
 		}
 		if v, ok := obj["collected_at"].(string); ok {
 			ref.CollectedAt, _ = time.Parse(time.RFC3339, v)
@@ -630,8 +666,9 @@ var (
 	evidenceSpec = object(false, root([]string{"id", "type"}, map[string]fieldSpec{
 		"id": withMin(nonEmpty(true), 1), "type": withMin(nonEmpty(true), 1),
 		"source_uri": str(false), "sha256": withFormat(str(false), "sha256"), "excerpt": str(false), "tool": str(false),
-		"collected_at": withFormat(str(false), "date-time"),
-		"metadata":     object(false, objectSpec{additional: true, additionalKind: "string"}),
+		"tool_version": str(false), "parameters": object(false, objectSpec{additional: true, additionalKind: "string"}),
+		"artifact_ids": array(false, str(true)), "collected_at": withFormat(str(false), "date-time"),
+		"metadata": object(false, objectSpec{additional: true, additionalKind: "string"}),
 	}))
 	recommendationSpec = object(false, root([]string{"action", "priority"}, map[string]fieldSpec{
 		"action": withMin(nonEmpty(true), 1), "priority": enum(true, "immediate", "high", "medium", "low", "long_term"), "rationale": str(false),
