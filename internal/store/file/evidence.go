@@ -10,8 +10,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Notyet1307/security-agent-suite/internal/domain"
+	"github.com/Notyet1307/security-agent-suite/internal/id"
 	"github.com/Notyet1307/security-agent-suite/internal/store"
 )
 
@@ -101,9 +103,9 @@ func (s *EvidenceStore) load() error {
 			if err := store.ValidateEvidenceScope(context.Background(), s.runs, s.artifacts, tenantID, runEntry.Name(), normalized); err != nil {
 				return fmt.Errorf("invalid persisted evidence %s: %w", entry.Name(), err)
 			}
-			filenameID := strings.TrimSuffix(entry.Name(), ".json")
-			if normalized.ID != filenameID {
-				return fmt.Errorf("evidence filename %q does not match id %q", entry.Name(), normalized.ID)
+			storageID := strings.TrimSuffix(entry.Name(), ".json")
+			if !store.ValidIdentifier(storageID) {
+				return fmt.Errorf("invalid evidence filename %q", entry.Name())
 			}
 			if _, exists := s.records[normalized.ID]; exists {
 				return fmt.Errorf("duplicate persisted evidence id %q", normalized.ID)
@@ -128,10 +130,6 @@ func (s *EvidenceStore) Append(ctx context.Context, tenantID, runID string, evid
 	if err != nil {
 		return domain.EvidenceRef{}, err
 	}
-	evidenceID := filepath.Base(normalized.ID)
-	if evidenceID != normalized.ID || strings.ContainsAny(normalized.ID, `/\\`) {
-		return domain.EvidenceRef{}, fmt.Errorf("%w: invalid evidence id", domain.ErrInvalidRequest)
-	}
 	if err := store.ValidateEvidenceScope(ctx, s.runs, s.artifacts, tenantID, runID, normalized); err != nil {
 		return domain.EvidenceRef{}, err
 	}
@@ -143,12 +141,15 @@ func (s *EvidenceStore) Append(ctx context.Context, tenantID, runID string, evid
 	if _, exists := s.records[normalized.ID]; exists {
 		return domain.EvidenceRef{}, domain.ErrAlreadyExists
 	}
+	storageID, err := id.New("evidence", time.Now())
+	if err != nil {
+		return domain.EvidenceRef{}, err
+	}
 	runDir := filepath.Join(s.dir, runID)
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
 		return domain.EvidenceRef{}, fmt.Errorf("create evidence run directory: %w", err)
 	}
-	path := filepath.Join(runDir, evidenceID+".json")
-	if err := writeImmutable(path, normalized); err != nil {
+	if err := writeImmutable(runDir, storageID, normalized); err != nil {
 		return domain.EvidenceRef{}, err
 	}
 	s.records[normalized.ID] = evidenceRecord{tenantID: tenantID, runID: runID, evidence: normalized}
@@ -210,7 +211,10 @@ func (s *EvidenceStore) List(ctx context.Context, tenantID, runID string) ([]dom
 	return result, nil
 }
 
-func writeImmutable(path string, evidence domain.EvidenceRef) error {
+func writeImmutable(runDir, storageID string, evidence domain.EvidenceRef) error {
+	if !store.ValidIdentifier(storageID) {
+		return fmt.Errorf("%w: invalid evidence storage id", domain.ErrInvalidRequest)
+	}
 	data, err := json.MarshalIndent(struct {
 		domain.EvidenceRef
 		Parameters map[string]string `json:"parameters"`
@@ -221,7 +225,7 @@ func writeImmutable(path string, evidence domain.EvidenceRef) error {
 	if len(data)+1 > maxEvidenceFileBytes {
 		return fmt.Errorf("%w: evidence record is too large", domain.ErrInvalidRequest)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".evidence-*.tmp")
+	tmp, err := os.CreateTemp(runDir, ".evidence-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create evidence temp file: %w", err)
 	}
@@ -243,6 +247,7 @@ func writeImmutable(path string, evidence domain.EvidenceRef) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close evidence: %w", err)
 	}
+	path := filepath.Join(runDir, storageID+".json")
 	if err := os.Link(tmpName, path); err != nil {
 		if os.IsExist(err) {
 			return domain.ErrAlreadyExists
