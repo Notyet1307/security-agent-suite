@@ -2,6 +2,7 @@ package artifacts
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -46,5 +47,49 @@ func TestArtifactPathBoundaries(t *testing.T) {
 	ref.URI = "artifact://runs/run-b/file"
 	if _, _, err := store.Open(context.Background(), "run-a", ref); err == nil {
 		t.Fatal("expected cross-run artifact to be rejected")
+	}
+}
+
+func TestPutReaderRegistersMetadataAndValidatesHash(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	const expectedSHA256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	ref, err := store.PutReader(context.Background(), "run-upload", "evidence.txt", "text/plain; charset=utf-8", strings.NewReader("hello"), expectedSHA256, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.SHA256 != expectedSHA256 || ref.SizeBytes != 5 || ref.MediaType != "text/plain; charset=utf-8" {
+		t.Fatalf("unexpected uploaded artifact: %+v", ref)
+	}
+	got, err := store.Get(context.Background(), "run-upload", ref.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := store.List(context.Background(), "run-upload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != ref.ID || got.URI != ref.URI || len(refs) != 1 || refs[0].ID != ref.ID {
+		t.Fatalf("registered artifact mismatch: got=%+v list=%+v", got, refs)
+	}
+
+	_, err = store.PutReader(context.Background(), "run-upload", "bad.txt", "text/plain", strings.NewReader("hello"), strings.Repeat("0", 64), now)
+	if !errors.Is(err, domain.ErrInvalidRequest) {
+		t.Fatalf("expected hash mismatch to be invalid, got %v", err)
+	}
+	_, err = store.PutReader(context.Background(), "run-upload", strings.Repeat("x", maxArtifactNameBytes+1), "text/plain", strings.NewReader("hello"), "", now)
+	if !errors.Is(err, domain.ErrInvalidRequest) {
+		t.Fatalf("expected long name to be invalid, got %v", err)
+	}
+	_, err = store.PutReader(context.Background(), "run-upload", "bad.txt", "not-a-media-type", strings.NewReader("hello"), "", now)
+	if !errors.Is(err, domain.ErrInvalidRequest) {
+		t.Fatalf("expected media type to be invalid, got %v", err)
+	}
+	refs, err = store.List(context.Background(), "run-upload")
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("failed upload was registered: refs=%+v err=%v", refs, err)
 	}
 }

@@ -23,6 +23,25 @@ make smoke
 
 数据写入 `./var/state` 和 `./var/artifacts`。删除这些目录会清除本地运行历史。
 
+## Artifact 上传与下载
+
+先创建 Run，再把原始字节流上传到该 Run 的 Artifact 命名空间：
+
+```sh
+ARTIFACT_SHA256=$(shasum -a 256 ./sample.json | cut -d ' ' -f 1)
+curl --fail-with-body \
+  -H "X-API-Key: $SAS_API_KEY" \
+  -H "X-Tenant-ID: default" \
+  -H "Content-Type: application/json" \
+  -H "X-Artifact-SHA256: $ARTIFACT_SHA256" \
+  --data-binary @./sample.json \
+  "http://127.0.0.1:8080/v1/runs/$RUN_ID/artifacts?name=sample.json"
+```
+
+服务端流式写入本地 Artifact 目录，返回包含 URI、SHA-256、大小和媒体类型的引用；正文不会进入 Run JSON。`X-Artifact-SHA256` 可省略，提供时不匹配会拒绝登记。上传、列表和下载都先按 `X-Tenant-ID` 查找 Run，跨租户统一返回 `404`。正文超过 `SAS_MAX_BODY_BYTES` 时返回结构化 `413 artifact_too_large`；当前本地文件后端不伪装成分片或预签名对象存储。
+
+回滚时先停止新的上传并保留 `SAS_ARTIFACT_DIR`，直到完成留存决定；旧版本不会读取 `.metadata` 注册表，因此仅由该上传 API 登记的 Artifact 在回滚后不可列出或下载，但原始文件仍保留。不要用 `make clean` 代替回滚。
+
 ## agent-compose 模式
 
 1. 启动并配置 agent-compose daemon；

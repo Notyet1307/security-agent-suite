@@ -1,13 +1,18 @@
 package artifacts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +21,12 @@ import (
 )
 
 var safeName = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+const (
+	metadataDirectory    = ".metadata"
+	maxArtifactNameBytes = 200
+	maxMediaTypeBytes    = 255
+)
 
 type Store struct {
 	root string
@@ -29,17 +40,47 @@ func New(root string) (*Store, error) {
 }
 
 func (s *Store) Put(ctx context.Context, runID, name, mediaType string, data []byte, now time.Time) (domain.ArtifactRef, error) {
+	return s.PutReader(ctx, runID, name, mediaType, bytes.NewReader(data), "", now)
+}
+
+// PutReader streams an artifact to disk, computes its SHA-256, and registers
+// the resulting metadata without loading the complete body into memory.
+func (s *Store) PutReader(ctx context.Context, runID, name, mediaType string, data io.Reader, expectedSHA256 string, now time.Time) (domain.ArtifactRef, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ArtifactRef{}, err
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" || filepath.Base(runID) != runID || strings.ContainsAny(runID, `/\`) {
-		return domain.ArtifactRef{}, fmt.Errorf("run id must be a single safe path segment")
+	rawRunID := strings.TrimSpace(runID)
+	runID = filepath.Base(rawRunID)
+	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: run id must be a single safe path segment", domain.ErrInvalidRequest)
 	}
-	name = safeName.ReplaceAllString(filepath.Base(strings.TrimSpace(name)), "-")
-	name = strings.Trim(name, ".-")
+	if data == nil {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: artifact body is required", domain.ErrInvalidRequest)
+	}
+	mediaType = strings.TrimSpace(mediaType)
+	if len(mediaType) > maxMediaTypeBytes {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: Content-Type is too long", domain.ErrInvalidRequest)
+	}
+	parsedMediaType, params, err := mime.ParseMediaType(mediaType)
+	if err != nil || !strings.Contains(parsedMediaType, "/") {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: valid Content-Type is required", domain.ErrInvalidRequest)
+	}
+	mediaType = mime.FormatMediaType(parsedMediaType, params)
+	expectedSHA256 = strings.ToLower(strings.TrimSpace(expectedSHA256))
+	if expectedSHA256 != "" {
+		digest, decodeErr := hex.DecodeString(expectedSHA256)
+		if decodeErr != nil || len(digest) != sha256.Size {
+			return domain.ArtifactRef{}, fmt.Errorf("%w: X-Artifact-SHA256 must be 64 hexadecimal characters", domain.ErrInvalidRequest)
+		}
+	}
+
+	name = filepath.Base(strings.TrimSpace(name))
+	name = safeName.ReplaceAllString(name, "-")
 	if name == "" {
-		name = "artifact.bin"
+		return domain.ArtifactRef{}, fmt.Errorf("%w: artifact name is required", domain.ErrInvalidRequest)
+	}
+	if len(name) > maxArtifactNameBytes {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: artifact name is too long", domain.ErrInvalidRequest)
 	}
 	runDir := filepath.Join(s.root, runID)
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
@@ -49,21 +90,169 @@ func (s *Store) Put(ctx context.Context, runID, name, mediaType string, data []b
 	if err != nil {
 		return domain.ArtifactRef{}, err
 	}
-	storedName := artifactID + "-" + name
+	storedName := artifactID
 	path := filepath.Join(runDir, storedName)
-	if err := os.WriteFile(path, data, 0o640); err != nil {
-		return domain.ArtifactRef{}, fmt.Errorf("write artifact: %w", err)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+	if err != nil {
+		return domain.ArtifactRef{}, fmt.Errorf("create artifact: %w", err)
 	}
-	digest := sha256.Sum256(data)
-	return domain.ArtifactRef{
+	hasher := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(file, hasher), data)
+	closeErr := file.Close()
+	if copyErr != nil {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, fmt.Errorf("write artifact: %w", copyErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, fmt.Errorf("close artifact: %w", closeErr)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, err
+	}
+	if size == 0 {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, fmt.Errorf("%w: artifact body must not be empty", domain.ErrInvalidRequest)
+	}
+	actualSHA256 := hex.EncodeToString(hasher.Sum(nil))
+	if expectedSHA256 != "" && expectedSHA256 != actualSHA256 {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, fmt.Errorf("%w: artifact SHA-256 does not match X-Artifact-SHA256", domain.ErrInvalidRequest)
+	}
+	ref := domain.ArtifactRef{
 		ID:        artifactID,
 		Name:      name,
 		URI:       "artifact://runs/" + runID + "/" + storedName,
 		MediaType: mediaType,
-		SHA256:    hex.EncodeToString(digest[:]),
-		SizeBytes: int64(len(data)),
+		SHA256:    actualSHA256,
+		SizeBytes: size,
 		CreatedAt: now.UTC(),
-	}, nil
+	}
+	if err := writeMetadata(runDir, ref); err != nil {
+		_ = os.Remove(path)
+		return domain.ArtifactRef{}, err
+	}
+	return ref, nil
+}
+
+func writeMetadata(runDir string, ref domain.ArtifactRef) error {
+	dir := filepath.Join(runDir, metadataDirectory)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create artifact metadata directory: %w", err)
+	}
+	file, err := os.CreateTemp(dir, "."+ref.ID+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create artifact metadata: %w", err)
+	}
+	temporaryPath := file.Name()
+	defer os.Remove(temporaryPath)
+	if err := file.Chmod(0o640); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("set artifact metadata permissions: %w", err)
+	}
+	if err := json.NewEncoder(file).Encode(ref); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write artifact metadata: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close artifact metadata: %w", err)
+	}
+	path := filepath.Join(dir, ref.ID+".json")
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("artifact metadata already exists")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect artifact metadata: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("publish artifact metadata: %w", err)
+	}
+	return nil
+}
+
+// Get returns registered metadata for one artifact in a run namespace.
+func (s *Store) Get(ctx context.Context, runID, artifactID string) (domain.ArtifactRef, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ArtifactRef{}, err
+	}
+	rawRunID := strings.TrimSpace(runID)
+	runID = filepath.Base(rawRunID)
+	rawArtifactID := strings.TrimSpace(artifactID)
+	artifactID = filepath.Base(rawArtifactID)
+	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) || rawArtifactID == "" || artifactID != rawArtifactID || strings.ContainsAny(rawArtifactID, `/\`) {
+		return domain.ArtifactRef{}, fmt.Errorf("%w: invalid artifact namespace", domain.ErrInvalidRequest)
+	}
+	path := filepath.Join(s.root, runID, metadataDirectory, artifactID+".json")
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return domain.ArtifactRef{}, domain.ErrNotFound
+		}
+		return domain.ArtifactRef{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return domain.ArtifactRef{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 64<<10 {
+		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata file")
+	}
+	var ref domain.ArtifactRef
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ref); err != nil {
+		return domain.ArtifactRef{}, fmt.Errorf("decode artifact metadata: %w", err)
+	}
+	if ref.ID != artifactID || ref.Name == "" || ref.MediaType == "" || ref.SHA256 == "" || ref.SizeBytes <= 0 || ref.CreatedAt.IsZero() {
+		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata")
+	}
+	prefix := "artifact://runs/" + runID + "/"
+	storedName := strings.TrimPrefix(ref.URI, prefix)
+	if !strings.HasPrefix(ref.URI, prefix) || storedName == "" || filepath.Base(storedName) != storedName {
+		return domain.ArtifactRef{}, fmt.Errorf("invalid artifact metadata URI")
+	}
+	return ref, nil
+}
+
+// List returns registered artifacts in deterministic creation order.
+func (s *Store) List(ctx context.Context, runID string) ([]domain.ArtifactRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rawRunID := strings.TrimSpace(runID)
+	runID = filepath.Base(rawRunID)
+	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) {
+		return nil, fmt.Errorf("%w: invalid run id", domain.ErrInvalidRequest)
+	}
+	entries, err := os.ReadDir(filepath.Join(s.root, runID, metadataDirectory))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []domain.ArtifactRef{}, nil
+		}
+		return nil, err
+	}
+	refs := make([]domain.ArtifactRef, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		ref, err := s.Get(ctx, runID, strings.TrimSuffix(entry.Name(), ".json"))
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].CreatedAt.Equal(refs[j].CreatedAt) {
+			return refs[i].ID < refs[j].ID
+		}
+		return refs[i].CreatedAt.Before(refs[j].CreatedAt)
+	})
+	return refs, nil
 }
 
 // Open opens a previously written artifact after validating that its URI stays
@@ -72,19 +261,31 @@ func (s *Store) Open(ctx context.Context, runID string, ref domain.ArtifactRef) 
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" || filepath.Base(runID) != runID || strings.ContainsAny(runID, `/\`) {
+	rawRunID := strings.TrimSpace(runID)
+	runID = filepath.Base(rawRunID)
+	if rawRunID == "" || runID != rawRunID || strings.ContainsAny(rawRunID, `/\`) {
 		return nil, nil, fmt.Errorf("invalid run id")
 	}
 	prefix := "artifact://runs/" + runID + "/"
 	if !strings.HasPrefix(ref.URI, prefix) {
 		return nil, nil, fmt.Errorf("artifact URI does not belong to run")
 	}
-	storedName := strings.TrimPrefix(ref.URI, prefix)
-	if storedName == "" || filepath.Base(storedName) != storedName {
+	rawStoredName := strings.TrimPrefix(ref.URI, prefix)
+	storedName := filepath.Base(rawStoredName)
+	if rawStoredName == "" || storedName != rawStoredName || strings.ContainsAny(rawStoredName, `/\`) {
 		return nil, nil, fmt.Errorf("invalid artifact URI")
 	}
 	path := filepath.Join(s.root, runID, storedName)
+	entry, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, domain.ErrNotFound
+		}
+		return nil, nil, err
+	}
+	if entry.Mode()&os.ModeSymlink != 0 || !entry.Mode().IsRegular() {
+		return nil, nil, domain.ErrNotFound
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -97,7 +298,7 @@ func (s *Store) Open(ctx context.Context, runID string, ref domain.ArtifactRef) 
 		_ = file.Close()
 		return nil, nil, err
 	}
-	if !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() || (ref.SizeBytes > 0 && info.Size() != ref.SizeBytes) {
 		_ = file.Close()
 		return nil, nil, domain.ErrNotFound
 	}

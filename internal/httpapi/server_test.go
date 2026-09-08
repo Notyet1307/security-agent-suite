@@ -39,7 +39,7 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1 << 20, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger).Handler())
+	server := httptest.NewServer(New(Config{APIKey: "test-key", MaxBodyBytes: 1024, RateLimitPerMinute: 1000, Ready: func() bool { return true }}, service, artifactStore, metrics, logger).Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/healthz")
@@ -115,6 +115,103 @@ func TestHTTPRunLifecycleAndTenantIsolation(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/json" || resp.Header.Get("ETag") != `"sha256:`+artifact.SHA256+`"` || int64(len(got)) != artifact.SizeBytes || !bytes.Equal(got, want) {
 		t.Fatalf("artifact download status=%d content-type=%q etag=%q size=%d want-size=%d body-match=%v", resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("ETag"), len(got), artifact.SizeBytes, bytes.Equal(got, want))
+	}
+
+	uploadBody := []byte("uploaded evidence")
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/v1/runs/"+completed.ID+"/artifacts?name=uploaded-evidence.txt", bytes.NewReader(uploadBody))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	req.Header.Set("X-Artifact-SHA256", "cd95569c49f302489b692431d2e0b42a3487e598d4c95c240c76413c00fee80a")
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		t.Fatalf("artifact upload status=%d body=%s", resp.StatusCode, body)
+	}
+	var uploaded domain.ArtifactRef
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		_ = resp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if uploaded.Name != "uploaded-evidence.txt" || uploaded.MediaType != "text/plain; charset=utf-8" || uploaded.SHA256 != "cd95569c49f302489b692431d2e0b42a3487e598d4c95c240c76413c00fee80a" || uploaded.SizeBytes != int64(len(uploadBody)) {
+		t.Fatalf("unexpected uploaded artifact: %+v", uploaded)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+completed.ID+"/artifacts", nil)
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listing struct {
+		RunID     string               `json:"run_id"`
+		Artifacts []domain.ArtifactRef `json:"artifacts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		_ = resp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || listing.RunID != completed.ID || len(listing.Artifacts) != 2 {
+		t.Fatalf("artifact listing status=%d body=%+v", resp.StatusCode, listing)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+completed.ID+"/artifacts/"+uploaded.ID, nil)
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadedDownload, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" || resp.Header.Get("ETag") != `"sha256:`+uploaded.SHA256+`"` || !bytes.Equal(uploadedDownload, uploadBody) {
+		t.Fatalf("uploaded artifact download status=%d content-type=%q etag=%q body=%q", resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("ETag"), uploadedDownload)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/v1/runs/"+completed.ID+"/artifacts?name=forbidden.txt", bytes.NewReader(uploadBody))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-b")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploadFailure errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&uploadFailure); err != nil {
+		_ = resp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound || uploadFailure.Error.Code != "not_found" {
+		t.Fatalf("cross-tenant upload status=%d body=%+v", resp.StatusCode, uploadFailure)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/v1/runs/"+completed.ID+"/artifacts?name=too-large.bin", bytes.NewReader(bytes.Repeat([]byte{'x'}, 1025)))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-API-Key", "test-key")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadFailure = errorResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&uploadFailure); err != nil {
+		_ = resp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || uploadFailure.Error.Code != "artifact_too_large" {
+		t.Fatalf("oversized upload status=%d body=%+v", resp.StatusCode, uploadFailure)
 	}
 
 	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/runs/"+completed.ID+"/artifacts/"+artifact.ID, nil)
