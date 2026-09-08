@@ -320,3 +320,18 @@ func TestParsePreservesEvidenceStoreFields(t *testing.T) {
 		t.Fatalf("parsed evidence=%+v", result.Evidence)
 	}
 }
+
+func TestValidateResultEvidence(t *testing.T) {
+	valid := domain.RunResult{Evidence: []domain.EvidenceRef{{ID: "stored-1"}}, Findings: []domain.Finding{{Severity: "high", EvidenceRefs: []string{"stored-1"}}}}
+	if err := ValidateResultEvidence(valid, map[string]struct{}{"stored-1": {}}); err != nil {
+		t.Fatalf("valid evidence: %v", err)
+	}
+	for name, result := range map[string]domain.RunResult{
+		"missing refs": {Findings: []domain.Finding{{Severity: "critical"}}},
+		"invalid ref":  {Findings: []domain.Finding{{Severity: "high", EvidenceRefs: []string{"other-run-evidence"}}}},
+	} {
+		if err := ValidateResultEvidence(result, map[string]struct{}{"stored-1": {}}); Code(err) != CodeEvidenceInvalid {
+			t.Fatalf("%s: code=%q err=%v", name, Code(err), err)
+		}
+	}
+}

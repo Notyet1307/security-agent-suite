@@ -32,6 +32,7 @@ type Service struct {
 	catalog  *catalog.Catalog
 	policy   *policy.Engine
 	executor executor.Executor
+	evidence store.EvidenceStore
 	prompt   *prompt.Builder
 	metrics  *observability.Metrics
 	logger   *slog.Logger
@@ -47,7 +48,7 @@ type Service struct {
 	stopOnce  sync.Once
 }
 
-func New(cfg Config, runStore store.RunStore, agentCatalog *catalog.Catalog, policyEngine *policy.Engine, runtime executor.Executor, promptBuilder *prompt.Builder, metrics *observability.Metrics, logger *slog.Logger) *Service {
+func New(cfg Config, runStore store.RunStore, agentCatalog *catalog.Catalog, policyEngine *policy.Engine, runtime executor.Executor, promptBuilder *prompt.Builder, metrics *observability.Metrics, logger *slog.Logger, evidenceStores ...store.EvidenceStore) *Service {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 1
 	}
@@ -58,9 +59,13 @@ func New(cfg Config, runStore store.RunStore, agentCatalog *catalog.Catalog, pol
 		cfg.MaxRunTimeout = 30 * time.Minute
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	var evidenceStore store.EvidenceStore
+	if len(evidenceStores) > 0 {
+		evidenceStore = evidenceStores[0]
+	}
 	return &Service{
 		cfg: cfg, store: runStore, catalog: agentCatalog, policy: policyEngine,
-		executor: runtime, prompt: promptBuilder, metrics: metrics, logger: logger,
+		executor: runtime, evidence: evidenceStore, prompt: promptBuilder, metrics: metrics, logger: logger,
 		queue: make(chan string, cfg.QueueSize), ctx: ctx, stop: cancel,
 		cancels: map[string]context.CancelFunc{},
 	}
@@ -355,11 +360,28 @@ func (s *Service) process(runID string) error {
 		cancel()
 		return nil
 	}
-
 	result, execErr := s.executor.Execute(execCtx, domain.ExecutionRequest{Run: *run, Agent: agent, Prompt: promptText, Timeout: timeout})
 	cancel()
 	if execErr == nil {
 		result = validation.Gate(agent.ID, result, s.executor.Name())
+		if s.evidence != nil && result.Status != domain.RunStatusFailed {
+			records, listErr := s.evidence.List(ctx, run.Scope.TenantID, run.ID)
+			if listErr != nil {
+				result.Status = domain.RunStatusFailed
+				result.Result.ErrorCode = validation.CodeEvidenceInvalid
+				result.Result.ErrorMessage = "load run evidence: " + listErr.Error()
+			} else {
+				allowed := make(map[string]struct{}, len(records))
+				for _, record := range records {
+					allowed[record.ID] = struct{}{}
+				}
+				if validationErr := validation.ValidateResultEvidence(result.Result, allowed); validationErr != nil {
+					result.Status = domain.RunStatusFailed
+					result.Result.ErrorCode = validation.Code(validationErr)
+					result.Result.ErrorMessage = validationErr.Error()
+				}
+			}
+		}
 	}
 
 	// Keep the cancellation registration until the terminal state is persisted;

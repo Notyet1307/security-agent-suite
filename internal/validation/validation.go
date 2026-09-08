@@ -37,6 +37,25 @@ func Code(err error) string {
 	return ""
 }
 
+// ValidateResultEvidence checks parsed findings against evidence IDs allowed for a run.
+// The caller supplies IDs from the tenant/run-scoped EvidenceStore.
+func ValidateResultEvidence(result domain.RunResult, allowedIDs map[string]struct{}) error {
+	for i, finding := range result.Findings {
+		if (finding.Severity == "high" || finding.Severity == "critical") && len(finding.EvidenceRefs) == 0 {
+			return &Error{Code: CodeEvidenceInvalid, Message: fmt.Sprintf("$.findings[%d] %s finding requires evidence_refs", i, finding.Severity)}
+		}
+		for j, ref := range finding.EvidenceRefs {
+			if ref == "" {
+				return &Error{Code: CodeEvidenceInvalid, Message: fmt.Sprintf("$.findings[%d].evidence_refs[%d] references missing evidence %q", i, j, ref)}
+			}
+			if _, ok := allowedIDs[ref]; !ok {
+				return &Error{Code: CodeEvidenceInvalid, Message: fmt.Sprintf("$.findings[%d].evidence_refs[%d] references missing evidence %q", i, j, ref)}
+			}
+		}
+	}
+	return nil
+}
+
 // Parse validates the supported portion of an agent's final JSON output.
 // Supported contracts are the five versioned agent output schemas in agents/*/output.schema.json:
 // root object closure, required fields, primitive/array/object types, enums, string bounds,
