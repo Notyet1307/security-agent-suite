@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Notyet1307/security-agent-suite/internal/app"
 	"github.com/Notyet1307/security-agent-suite/internal/artifacts"
@@ -57,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.getRunEvents)
 	mux.HandleFunc("GET /v1/runs/{runID}/artifacts", s.getRunArtifacts)
+	mux.HandleFunc("POST /v1/runs/{runID}/artifacts", s.uploadArtifact)
 	mux.HandleFunc("GET /v1/runs/{runID}/artifacts/{artifactID}", s.downloadArtifact)
 	mux.HandleFunc("POST /v1/runs/{runID}/approve", s.approveRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
@@ -179,11 +181,59 @@ func (s *Server) getRunArtifacts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	artifacts := []domain.ArtifactRef{}
-	if run.Result != nil {
-		artifacts = run.Result.Artifacts
+	registered, err := s.artifacts.List(r.Context(), run.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run_id": run.ID, "artifacts": artifacts})
+	listed := make([]domain.ArtifactRef, 0, len(registered))
+	seen := make(map[string]struct{}, len(registered))
+	if run.Result != nil {
+		for _, ref := range run.Result.Artifacts {
+			listed = append(listed, ref)
+			seen[ref.ID] = struct{}{}
+		}
+	}
+	for _, ref := range registered {
+		if _, exists := seen[ref.ID]; exists {
+			continue
+		}
+		listed = append(listed, ref)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run_id": run.ID, "artifacts": listed})
+}
+
+func (s *Server) uploadArtifact(w http.ResponseWriter, r *http.Request) {
+	run, err := s.service.GetRun(r.Context(), tenantIDFromContext(r.Context()), r.PathValue("runID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if r.ContentLength > s.cfg.MaxBodyBytes {
+		writeStatusError(w, r, http.StatusRequestEntityTooLarge, "artifact_too_large", "artifact exceeds the configured request body limit")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+	ref, err := s.artifacts.PutReader(
+		r.Context(),
+		run.ID,
+		r.URL.Query().Get("name"),
+		r.Header.Get("Content-Type"),
+		r.Body,
+		r.Header.Get("X-Artifact-SHA256"),
+		time.Now(),
+	)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeStatusError(w, r, http.StatusRequestEntityTooLarge, "artifact_too_large", "artifact exceeds the configured request body limit")
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/runs/"+run.ID+"/artifacts/"+ref.ID)
+	writeJSON(w, http.StatusCreated, ref)
 }
 
 func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
@@ -192,22 +242,25 @@ func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if run.Result == nil {
-		writeError(w, r, domain.ErrNotFound)
+	selected, err := s.artifacts.Get(r.Context(), run.ID, r.PathValue("artifactID"))
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		writeError(w, r, err)
 		return
 	}
-	var selected *domain.ArtifactRef
-	for i := range run.Result.Artifacts {
-		if run.Result.Artifacts[i].ID == r.PathValue("artifactID") {
-			selected = &run.Result.Artifacts[i]
-			break
+	if errors.Is(err, domain.ErrNotFound) && run.Result != nil {
+		for _, ref := range run.Result.Artifacts {
+			if ref.ID == r.PathValue("artifactID") {
+				selected = ref
+				err = nil
+				break
+			}
 		}
 	}
-	if selected == nil {
+	if err != nil {
 		writeError(w, r, domain.ErrNotFound)
 		return
 	}
-	file, info, err := s.artifacts.Open(r.Context(), run.ID, *selected)
+	file, info, err := s.artifacts.Open(r.Context(), run.ID, selected)
 	if err != nil {
 		writeError(w, r, err)
 		return

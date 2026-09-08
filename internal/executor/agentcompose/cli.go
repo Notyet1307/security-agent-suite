@@ -256,6 +256,12 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	commandContextErr := execCtx.Err()
+	// The execution deadline governs the child process. Snapshot it before
+	// post-processing so artifact persistence cannot reclassify a completed run.
+	if cancel != nil {
+		cancel()
+	}
 	finished := time.Now()
 	result := domain.RunResult{Executor: e.Name(), Summary: "agent-compose run completed"}
 	envelope, runtimeResult, parseErr := ParseRuntimeEnvelope(stdout.Bytes())
@@ -304,11 +310,11 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 		artifactsOut = append(artifactsOut, finalArtifact)
 	}
 	result.Artifacts = artifactsOut
-	if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, execCtx.Err()
+	if errors.Is(commandContextErr, context.DeadlineExceeded) {
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, commandContextErr
 	}
-	if errors.Is(execCtx.Err(), context.Canceled) {
-		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, execCtx.Err()
+	if errors.Is(commandContextErr, context.Canceled) {
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: result}, commandContextErr
 	}
 	if err != nil && !truncated && envelopeParseErr == nil && runtimeStatus(envelope) == domain.RunStatusCancelled {
 		result.ErrorCode = "agent_compose_cancelled"

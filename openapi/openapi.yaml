@@ -192,6 +192,41 @@ paths:
                     items: { $ref: "#/components/schemas/RunEvent" }
         default: { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/artifacts:
+    post:
+      tags: [Runs]
+      summary: Upload and register a run artifact
+      description: >-
+        Streams the request body into the run-scoped artifact store, computes
+        SHA-256, and returns metadata rather than embedding bytes in the Run.
+        X-Artifact-SHA256 is optional; when supplied, a mismatch is rejected.
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: X-Artifact-SHA256
+          in: header
+          required: false
+          schema: { type: string, pattern: "^[0-9a-fA-F]{64}$" }
+      requestBody:
+        required: true
+        description: Raw artifact bytes. Content-Type is stored as artifact metadata.
+        content:
+          "*/*":
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Artifact stored and registered
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        "413":
+          $ref: "#/components/responses/Error"
+        default: { $ref: "#/components/responses/Error" }
     get:
       tags: [Runs]
       summary: List run artifacts

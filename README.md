@@ -188,10 +188,13 @@ agent-compose --json --timeout 0 \
 | `POST` | `/v1/agents/{agent_id}/runs` | 创建运行 |
 | `GET` | `/v1/runs/{run_id}` | 查询运行和结果 |
 | `GET` | `/v1/runs/{run_id}/events` | 查询审计事件 |
+| `POST` | `/v1/runs/{run_id}/artifacts?name=...` | 流式上传并登记运行产物；可用 `X-Artifact-SHA256` 校验正文 |
 | `GET` | `/v1/runs/{run_id}/artifacts` | 查询运行产物元数据 |
 | `GET` | `/v1/runs/{run_id}/artifacts/{artifact_id}` | 下载运行产物 |
 | `POST` | `/v1/runs/{run_id}/approve` | 审批高风险运行 |
 | `POST` | `/v1/runs/{run_id}/cancel` | 取消排队或运行中任务 |
+
+Artifact 上传必须携带与 Run 一致的 `X-Tenant-ID` 和有效 `Content-Type`；服务端按 `SAS_MAX_BODY_BYTES` 限制正文，计算 SHA-256，并只把 URI、大小和媒体类型等引用元数据返回给客户端。
 
 运行中取消的语义：API 请求取消先返回 `202`（仍在停止）；Go context 是权威，最终 Run 为 `cancelled` 且 `error_code=executor_cancelled`。只有 Go context 尚未到期而 runtime envelope 自身报告 `canceled`/`cancelled` 时才使用 `agent_compose_cancelled`；成功解码的 runtime provenance 仍保留。
 
