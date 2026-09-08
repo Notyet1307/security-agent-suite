@@ -17,6 +17,7 @@
 - SAS-102 release contract in `release-manifest.json`: the checked-in `linux/arm64` source of truth and verified-deployment metadata pins agent-compose `v2609.1.0` at `docker.io/chaitin/agent-compose@sha256:79eceaf444f0a59555d0871ce77e11dd4348fe49071b6026cd34faafcc429bfd`, Guest at `docker.io/chaitin/agent-compose-guest@sha256:f1ebca0021d1de4ebd02d4da4117d7651e09b5a6db35be20092f03cc26a586b9`, and OctoBus at `docker.io/chaitin/octobus@sha256:9961c9d80d7ba14001da7b96967980c85bec44ab846f87cc2a4e7ff55d9c280b`. The raw `agent-compose.yml` SHA-256 is paired with parser version `v2609.1.0`, the authoritative compose validator when run; no upstream compose schema ID exists and this does not claim CI ran the parser. Doctor enforces agent-compose version and Guest release digest and checks the OctoBus status contract; the agent-compose/OctoBus RepoDigests remain operator-verified deployment inputs. Manifest normal/drift tests are checked in.
 - SAS-201 local-file Artifact baseline: authenticated tenant-scoped streaming upload, atomic metadata registration, SHA-256/size/media-type validation, listing, and ranged download; Artifact bytes stay outside Run JSON.
 - SAS-202 append-only Evidence Store: source/tool/version/parameters/time/SHA-256 fields, same-Run Artifact validation, tenant-scoped append/list/get, immutable local persistence, and no update/delete path.
+- SAS-203 Evidence 引用校验：执行完成时按 tenant/run 加载 Evidence ID，拒绝无效引用及无证据的 High/Critical Finding。
 
 ## Verification evidence
 

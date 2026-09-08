@@ -11,6 +11,7 @@
 - SAS-103 synthetic real-Sandbox acceptance harness and evidence verifier.
 - Run-scoped streaming Artifact upload and metadata registration with SHA-256 validation and tenant-authorized download.
 - Append-only Evidence Store with source/tool/version/parameters/time/SHA-256 metadata, optional same-Run Artifact binding, tenant isolation, and immutable file persistence.
+- SAS-203 Finding/Timeline/AttackPath 引用校验，并在生产执行完成路径启用同 Run/tenant Evidence 校验。
 
 ### Changed
 
