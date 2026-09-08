@@ -75,7 +75,7 @@ agent-compose 负责 Agent、Sandbox、Skills、Workspace 和调度生命周期�
 - Go API 服务 `sasd` 与调用 CLI `sasctl`；
 - Run 状态机、队列、幂等、审批、取消、超时；
 - Mock 与 agent-compose CLI 两种执行器；
-- 文件持久化、Artifact、审计事件和基础指标；
+- 文件持久化、Artifact、append-only Evidence Store、审计事件和基础指标；
 - OpenAPI、JSON Schema、示例请求；
 - Docker、Kubernetes 起步清单、PostgreSQL 目标模型；
 - 单元测试、HTTP 集成测试、CI、CodeQL、Dependabot；
@@ -188,13 +188,16 @@ agent-compose --json --timeout 0 \
 | `POST` | `/v1/agents/{agent_id}/runs` | 创建运行 |
 | `GET` | `/v1/runs/{run_id}` | 查询运行和结果 |
 | `GET` | `/v1/runs/{run_id}/events` | 查询审计事件 |
+| `POST` | `/v1/runs/{run_id}/evidence` | 追加不可变 Evidence；服务端可生成 ID 和采集时间 |
+| `GET` | `/v1/runs/{run_id}/evidence` | 查询运行 Evidence |
+| `GET` | `/v1/runs/{run_id}/evidence/{evidence_id}` | 查询单条 Evidence |
 | `POST` | `/v1/runs/{run_id}/artifacts?name=...` | 流式上传并登记运行产物；可用 `X-Artifact-SHA256` 校验正文 |
 | `GET` | `/v1/runs/{run_id}/artifacts` | 查询运行产物元数据 |
 | `GET` | `/v1/runs/{run_id}/artifacts/{artifact_id}` | 下载运行产物 |
 | `POST` | `/v1/runs/{run_id}/approve` | 审批高风险运行 |
 | `POST` | `/v1/runs/{run_id}/cancel` | 取消排队或运行中任务 |
 
-Artifact 上传必须携带与 Run 一致的 `X-Tenant-ID` 和有效 `Content-Type`；服务端按 `SAS_MAX_BODY_BYTES` 限制正文，计算 SHA-256，并只把 URI、大小和媒体类型等引用元数据返回给客户端。
+Evidence 追加要求 `type`、`source_uri`、SHA-256、`tool`、`tool_version` 和 `parameters`；服务端可生成 Evidence ID 和 `collected_at`。`artifact_ids`（如提供）记录原始 Artifact 绑定，且必须引用同一 Run 下已登记的 Artifact。Evidence ID 一旦写入不能覆盖，跨租户访问统一隐藏为 `404`。
 
 运行中取消的语义：API 请求取消先返回 `202`（仍在停止）；Go context 是权威，最终 Run 为 `cancelled` 且 `error_code=executor_cancelled`。只有 Go context 尚未到期而 runtime envelope 自身报告 `canceled`/`cancelled` 时才使用 `agent_compose_cancelled`；成功解码的 runtime provenance 仍保留。
 

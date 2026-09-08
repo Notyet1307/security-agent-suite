@@ -141,6 +141,9 @@ type EvidenceRef struct {
 	SHA256      string            `json:"sha256,omitempty"`
 	Excerpt     string            `json:"excerpt,omitempty"`
 	Tool        string            `json:"tool,omitempty"`
+	ToolVersion string            `json:"tool_version,omitempty"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ArtifactIDs []string          `json:"artifact_ids,omitempty"`
 	CollectedAt time.Time         `json:"collected_at,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }

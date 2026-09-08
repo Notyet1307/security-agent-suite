@@ -191,6 +191,70 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/RunEvent" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/evidence:
+    post:
+      tags: [Runs]
+      summary: Append immutable run evidence
+      description: >-
+        Appends one immutable Evidence record. The server may generate the id
+        and collection time when omitted; existing evidence ids cannot be
+        replaced. When supplied, Artifact references must belong to the same
+        Run and match the Evidence hash.
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EvidenceAppendRequest" }
+      responses:
+        "201":
+          description: Evidence appended
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredEvidence" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      tags: [Runs]
+      summary: List immutable run evidence
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Evidence records in deterministic collection order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, evidence]
+                properties:
+                  run_id: { type: string }
+                  evidence:
+                    type: array
+                    items: { $ref: "#/components/schemas/StoredEvidence" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/evidence/{evidenceID}:
+    get:
+      tags: [Runs]
+      summary: Get one immutable Evidence record
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+        - name: evidenceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Evidence record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredEvidence" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/artifacts:
     post:
       tags: [Runs]
@@ -477,12 +541,36 @@ components:
       type: object
       required: [id, type]
       properties:
-        id: { type: string }
-        type: { type: string }
-        source_uri: { type: string }
-        sha256: { type: string }
+        id: { type: string, minLength: 1 }
+        type: { type: string, minLength: 1 }
+        source_uri: { type: string, minLength: 1 }
+        sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
         excerpt: { type: string }
-        tool: { type: string }
+        tool: { type: string, minLength: 1 }
+        tool_version: { type: string, minLength: 1 }
+        parameters: { type: object, additionalProperties: { type: string } }
+        artifact_ids: { type: array, uniqueItems: true, items: { type: string, minLength: 1 } }
+        collected_at: { type: string, format: date-time }
+        metadata: { type: object, additionalProperties: { type: string } }
+    StoredEvidence:
+      allOf:
+        - $ref: "#/components/schemas/Evidence"
+        - type: object
+          required: [id, type, source_uri, sha256, tool, tool_version, parameters, collected_at]
+    EvidenceAppendRequest:
+      type: object
+      additionalProperties: false
+      required: [type, source_uri, sha256, tool, tool_version, parameters]
+      properties:
+        id: { type: string, minLength: 1 }
+        type: { type: string, minLength: 1 }
+        source_uri: { type: string, minLength: 1 }
+        sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        excerpt: { type: string }
+        tool: { type: string, minLength: 1 }
+        tool_version: { type: string, minLength: 1 }
+        parameters: { type: object, additionalProperties: { type: string } }
+        artifact_ids: { type: array, uniqueItems: true, items: { type: string, minLength: 1 } }
         collected_at: { type: string, format: date-time }
         metadata: { type: object, additionalProperties: { type: string } }
     Finding:

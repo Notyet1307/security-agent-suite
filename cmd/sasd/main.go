@@ -53,6 +53,10 @@ func main() {
 	if err != nil {
 		fatal(logger, "initialize artifact store", err)
 	}
+	evidenceStore, err := filestore.NewEvidenceStore(cfg.StateDir, runStore, artifactStore)
+	if err != nil {
+		fatal(logger, "initialize evidence store", err)
+	}
 	metrics := observability.NewMetrics()
 
 	var runtime executor.Executor
@@ -103,7 +107,7 @@ func main() {
 		APIKey: cfg.APIKey, MaxBodyBytes: cfg.MaxBodyBytes,
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
 		Version:            version, Commit: commit, Ready: readiness.Load,
-	}, service, artifactStore, metrics, logger)
+	}, service, artifactStore, metrics, logger, evidenceStore)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
