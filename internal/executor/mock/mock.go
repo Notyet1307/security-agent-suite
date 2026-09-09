@@ -28,14 +28,22 @@ func (e *Executor) Execute(ctx context.Context, request domain.ExecutionRequest)
 	case <-time.After(e.delay):
 	}
 
-	payload := map[string]any{
-		"protocol":    "security-agent-suite.mock-result.v1",
-		"run_id":      request.Run.ID,
-		"agent_id":    request.Agent.ID,
-		"mode":        request.Run.Mode,
-		"input_count": len(request.Run.Inputs),
-		"message":     "Mock execution completed. No real security conclusion was produced.",
+	var payload map[string]any
+	switch request.Agent.ID {
+	case "event-triage":
+		payload = map[string]any{"protocol": "security-agent-suite.event-triage.v1", "status": "completed", "summary": "Mock execution completed. No real security conclusion was produced.", "classification": "insufficient_evidence", "severity": "undetermined", "confidence": 0, "hypotheses": []any{}, "evidence": []any{}, "findings": []any{}, "recommended_actions": []any{}, "limitations": []string{"mock_executor", "no_real_tools_called", "no_security_finding_generated"}}
+	case "traffic-analysis":
+		payload = map[string]any{"protocol": "security-agent-suite.traffic-analysis.v1", "status": "completed", "summary": "Mock execution completed. No real security conclusion was produced.", "evidence": []any{}, "timeline": []any{}, "findings": []any{}, "limitations": []string{"mock_executor", "no_real_tools_called", "no_security_finding_generated"}}
+	case "security-report":
+		payload = map[string]any{"protocol": "security-agent-suite.security-report.v1", "status": "completed", "report_type": "daily", "period": map[string]any{"start": "1970-01-01T00:00:00Z", "end": "1970-01-01T00:00:00Z", "timezone": "UTC"}, "executive_summary": "No real security conclusion was produced.", "metrics": []any{}, "key_events": []any{}, "recommendations": []any{}, "artifacts": []any{}, "validation": map[string]any{"numbers": "not_applicable", "citations": "not_applicable", "template": "not_applicable", "sensitive_data": "not_applicable"}, "limitations": []string{"mock_executor", "no_real_tools_called", "no_security_finding_generated"}}
+	case "compliance-query":
+		payload = map[string]any{"protocol": "security-agent-suite.compliance-query.v1", "status": "completed", "answer": "No real compliance conclusion was produced.", "applicability": map[string]any{"applies": "unknown", "assumptions": []any{}, "reason": "No real sources were consulted."}, "citations": []any{}, "control_gaps": []any{}, "evidence_requirements": []any{}, "recommendations": []any{}, "uncertainty": []string{"mock_executor produced no source-backed assessment."}}
+	case "attack-path-validation":
+		payload = map[string]any{"protocol": "security-agent-suite.attack-path-validation.v1", "status": "completed", "summary": "Mock execution completed. No real security conclusion was produced.", "scope_check": map[string]any{"authorized": false, "authorization_ref": "", "approval_id": "", "targets": []any{}, "checks": []any{}}, "validations": []any{}, "evidence": []any{}, "findings": []any{}, "attack_paths": []any{}, "stop_reason": "mock_executor", "limitations": []string{"mock_executor", "no_real_tools_called", "no_security_finding_generated"}}
+	default:
+		return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: domain.RunResult{Executor: e.Name(), Summary: "Mock executor rejected unknown agent.", ErrorCode: "unsupported_agent", ErrorMessage: "no mock output contract for agent " + request.Agent.ID}}, nil
 	}
+
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return domain.ExecutionResult{}, err

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Notyet1307/security-agent-suite/internal/artifacts"
 	"github.com/Notyet1307/security-agent-suite/internal/domain"
+	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
 
 func TestExecuteProducesClearlyMarkedMockArtifact(t *testing.T) {
@@ -25,6 +26,42 @@ func TestExecuteProducesClearlyMarkedMockArtifact(t *testing.T) {
 	}
 	if len(result.Result.Limitations) == 0 {
 		t.Fatal("mock output must state limitations")
+	}
+}
+
+func TestExecuteOutputsPassGateForEveryKnownAgent(t *testing.T) {
+	for _, agentID := range validation.SupportedAgents() {
+		t.Run(agentID, func(t *testing.T) {
+			store, err := artifacts.New(filepath.Join(t.TempDir(), "artifacts"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := New(store).Execute(context.Background(), domain.ExecutionRequest{Run: domain.Run{ID: "run-" + agentID}, Agent: domain.AgentDefinition{ID: agentID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			gated := validation.Gate(agentID, result, "mock")
+			if gated.Status != domain.RunStatusSucceeded {
+				t.Fatalf("status=%s error=%s", gated.Status, gated.Result.ErrorMessage)
+			}
+			if len(gated.Result.RawOutput) == 0 || len(gated.Result.Artifacts) != 1 {
+				t.Fatalf("raw/artifact not retained: %+v", gated.Result)
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsUnknownAgent(t *testing.T) {
+	store, err := artifacts.New(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := New(store).Execute(context.Background(), domain.ExecutionRequest{Run: domain.Run{ID: "run-unknown"}, Agent: domain.AgentDefinition{ID: "unknown-agent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status == domain.RunStatusSucceeded {
+		t.Fatal("unknown agent must not succeed")
 	}
 }
 

@@ -606,6 +606,30 @@ func TestAgentComposeProtocolUsesResolvedBinary(t *testing.T) {
 	}
 }
 
+func TestMissingAgentComposeBinaryFailsClosed(t *testing.T) {
+	cfg := testConfig("agentcompose-cli")
+	deps := fakeDependencies(&fakeHTTP{}, composeFixture)
+	deps.LookPath = func(string) (string, error) { return "", errors.New("not installed") }
+	report := RunWithDependencies(context.Background(), cfg, deps)
+	for _, tc := range []struct {
+		name   string
+		status CheckStatus
+	}{
+		{"compose_file", StatusUnknown},
+		{"agent_compose_binary", StatusFailed},
+	} {
+		if check := checkByName(report, tc.name); !check.Required || check.Status != tc.status {
+			t.Fatalf("%s=%+v", tc.name, check)
+		}
+	}
+	if check := checkByName(report, "agent_compose_version"); check.Status != StatusUnknown {
+		t.Fatalf("agent_compose_version=%+v", check)
+	}
+	if report.ExitCode() == 0 || report.Overall == OverallPassed {
+		t.Fatalf("missing binary unexpectedly passed: %+v", report)
+	}
+}
+
 func TestComposeInterpolationAndDockerInspectFailClosed(t *testing.T) {
 	cfg := testConfig("agentcompose-cli")
 	badCompose := strings.Replace(composeFixture, "${SAS_AGENT_MODEL}", "${MISSING_MODEL}", 1)

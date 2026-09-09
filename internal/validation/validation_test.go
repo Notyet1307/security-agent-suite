@@ -145,12 +145,11 @@ func TestGateUsesTrustedExecutorEvidence(t *testing.T) {
 	}
 }
 
-func TestGatePreservesSyntheticMockBypass(t *testing.T) {
+func TestGateRejectsSyntheticMockOutput(t *testing.T) {
 	raw := `{"protocol":"security-agent-suite.mock-result.v1","evidence":[{"id":"fake"}]}`
-	execution := domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{Summary: "mock", RawOutput: []byte(raw)}}
-	got := Gate("event-triage", execution, "mock")
-	if got.Status != execution.Status || got.Result.Summary != execution.Result.Summary || string(got.Result.RawOutput) != raw || got.Result.ErrorCode != "" {
-		t.Fatalf("synthetic mock was not bypassed: %+v", got)
+	got := Gate("event-triage", domain.ExecutionResult{Status: domain.RunStatusSucceeded, Result: domain.RunResult{Summary: "mock", RawOutput: []byte(raw)}}, "mock")
+	if got.Status != domain.RunStatusFailed || got.Result.ErrorCode == "" || string(got.Result.RawOutput) != raw {
+		t.Fatalf("synthetic mock was accepted or raw output changed: %+v", got)
 	}
 }
 func TestGateBoundsEarlyResultText(t *testing.T) {

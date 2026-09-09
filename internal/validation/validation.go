@@ -155,14 +155,10 @@ func SupportedAgents() []string {
 	return []string{"traffic-analysis", "security-report", "compliance-query", "event-triage", "attack-path-validation"}
 }
 
-// Gate prevents any non-synthetic executor from treating an unvalidated successful
-// result as a security conclusion. Mock is deliberately marked by its own protocol.
+// Gate prevents any unvalidated successful result from becoming a security conclusion.
 func Gate(agentID string, execution domain.ExecutionResult, executorName string) domain.ExecutionResult {
 	execution.Result.Summary = domain.BoundedText(execution.Result.Summary, domain.MaxSummaryBytes)
 	execution.Result.ErrorMessage = domain.BoundedText(execution.Result.ErrorMessage, domain.MaxErrorMessageBytes)
-	if executorName == "mock" && isSyntheticMock(execution.Result.RawOutput) {
-		return execution
-	}
 	if execution.Status != domain.RunStatusSucceeded && execution.Status != domain.RunStatusPartial {
 		return execution
 	}
@@ -183,7 +179,6 @@ func Gate(agentID string, execution domain.ExecutionResult, executorName string)
 	parsed.ErrorCode = Code(err)
 	parsed.ErrorMessage = domain.BoundedText(err.Error(), domain.MaxErrorMessageBytes)
 	return domain.ExecutionResult{Status: domain.RunStatusFailed, Result: parsed}
-
 }
 
 func constrainedStatus(raw, payload domain.RunStatus) domain.RunStatus {
@@ -303,13 +298,6 @@ func trustedEvidenceIDs(evidence []domain.EvidenceRef) map[string]struct{} {
 		}
 	}
 	return ids
-}
-
-func isSyntheticMock(raw []byte) bool {
-	var payload struct {
-		Protocol string `json:"protocol"`
-	}
-	return json.Unmarshal(raw, &payload) == nil && payload.Protocol == "security-agent-suite.mock-result.v1"
 }
 
 func statusFor(status string) domain.RunStatus {
