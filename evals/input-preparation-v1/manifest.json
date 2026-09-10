@@ -1,0 +1,185 @@
+{
+  "version": "sas.input-fixtures/v1",
+  "spec": "https://github.com/Notyet1307/security-agent-suite/issues/70",
+  "spec_version": 2,
+  "source": {
+    "kind": "repository-authored-synthetic",
+    "task": 71,
+    "date": "2026-09-10",
+    "real_data": false
+  },
+  "schema_path": "../../contracts/synthetic-alert-v1.schema.json",
+  "schema_sha256": "754438471f89afeefd28f831f112f59179bdb15c59818d19cc2c0b644ac6c22d",
+  "fixtures": [
+    {
+      "id": "normal",
+      "path": "normal.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a",
+        "size_bytes": 205,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "accepted",
+        "submit_http_status": 202,
+        "error_code": null,
+        "observation_count": 1,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "empty-observations",
+      "path": "empty-observations.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e",
+        "size_bytes": 104,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "accepted",
+        "submit_http_status": 202,
+        "error_code": null,
+        "observation_count": 0,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "prompt-injection",
+      "path": "prompt-injection.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245",
+        "size_bytes": 261,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "accepted",
+        "submit_http_status": 202,
+        "error_code": null,
+        "observation_count": 1,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "damaged",
+      "path": "damaged.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "1f56b30b7a5370cf5950a2684776bff4ef5f9e11cc38d9979733b7ed05df946b",
+        "size_bytes": 202,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_json",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "duplicate-key",
+      "path": "duplicate-key.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "ff6652284392ebe34eca5461d38d1318e44a5e0ecf84e122e810c2f9aadb426f",
+        "size_bytes": 222,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_json",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "trailing-data",
+      "path": "trailing-data.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "d1c28694fc4a2643c0bab3a5b0b9a29692a2977e1fd80834d10f91e2553be25f",
+        "size_bytes": 208,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_json",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "invalid-utf8",
+      "path": "invalid-utf8.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "6706b9a126bbb214c77de9e1698b6d58949d3c00bfc4d2fa8312b97a8e6ebaeb",
+        "size_bytes": 202,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_json",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "nonstandard-number",
+      "path": "nonstandard-number.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "33fbbc352b83c857ed5deba972745298ee57f8d8cbc94aa23cf46ceed86a86b2",
+        "size_bytes": 204,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_json",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "unknown-version",
+      "path": "unknown-version.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "e2e8e20d19eeeabda256a8e02fd8f1853b7281832a64ef9101904a122acb0281",
+        "size_bytes": 205,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_schema",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    },
+    {
+      "id": "non-synthetic",
+      "path": "non-synthetic.payload",
+      "input_manifest": {
+        "schema": "sas.synthetic-alert/v1",
+        "sha256": "e219beb34bcddb16dd29d78597d36a2bb72c6d5cf61b6d2b542d40ef73dcfffd",
+        "size_bytes": 206,
+        "media_type": "application/json"
+      },
+      "expected": {
+        "validation": "invalid_schema",
+        "submit_http_status": 400,
+        "error_code": "invalid_request",
+        "observation_count": null,
+        "security_verdict": null
+      }
+    }
+  ]
+}
