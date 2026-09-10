@@ -1,0 +1,21 @@
+go test -race ./...
+ok  	github.com/Notyet1307/security-agent-suite/cmd/sasctl	1.861s
+ok  	github.com/Notyet1307/security-agent-suite/cmd/sasd	2.321s
+ok  	github.com/Notyet1307/security-agent-suite/internal/app	4.836s
+ok  	github.com/Notyet1307/security-agent-suite/internal/artifacts	2.935s
+ok  	github.com/Notyet1307/security-agent-suite/internal/catalog	3.855s
+ok  	github.com/Notyet1307/security-agent-suite/internal/config	3.314s
+ok  	github.com/Notyet1307/security-agent-suite/internal/doctor	4.894s
+ok  	github.com/Notyet1307/security-agent-suite/internal/domain	5.363s
+?   	github.com/Notyet1307/security-agent-suite/internal/executor	[no test files]
+ok  	github.com/Notyet1307/security-agent-suite/internal/executor/agentcompose	46.950s
+ok  	github.com/Notyet1307/security-agent-suite/internal/executor/mock	6.755s
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	14.024s
+ok  	github.com/Notyet1307/security-agent-suite/internal/id	5.728s
+ok  	github.com/Notyet1307/security-agent-suite/internal/observability	5.623s
+ok  	github.com/Notyet1307/security-agent-suite/internal/policy	5.769s
+ok  	github.com/Notyet1307/security-agent-suite/internal/prompt	5.761s
+?   	github.com/Notyet1307/security-agent-suite/internal/store	[no test files]
+ok  	github.com/Notyet1307/security-agent-suite/internal/store/file	5.678s
+ok  	github.com/Notyet1307/security-agent-suite/internal/store/memory	5.729s
+ok  	github.com/Notyet1307/security-agent-suite/internal/validation	5.808s

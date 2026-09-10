@@ -1,0 +1,144 @@
+package httpapi
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"github.com/Notyet1307/security-agent-suite/internal/domain"
+	"os"
+	"testing"
+	"time"
+)
+
+// Independent acceptance probe: public HTTP handlers, real temporary file stores,
+// and the explicitly labelled counting test executor; no model or external target.
+func TestAcceptance73RawBinding(t *testing.T) {
+	data, err := os.ReadFile("../../evals/input-preparation-v1/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pack struct {
+		Fixtures []struct {
+			ID       string `json:"id"`
+			Path     string `json:"path"`
+			Manifest struct {
+				SHA256    string `json:"sha256"`
+				SizeBytes int    `json:"size_bytes"`
+			} `json:"input_manifest"`
+			Expected struct {
+				Status int `json:"submit_http_status"`
+			} `json:"expected"`
+		} `json:"fixtures"`
+	}
+	if err = json.Unmarshal(data, &pack); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range pack.Fixtures {
+		t.Run(f.ID, func(t *testing.T) {
+			h, c := manualHTTP(t)
+			raw, err := os.ReadFile("../../evals/input-preparation-v1/" + f.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+			if digest != f.Manifest.SHA256 || len(raw) != f.Manifest.SizeBytes {
+				t.Fatal("fixture manifest mismatch")
+			}
+			w := inputCall(h, "POST", "/v1/agents/event-triage/runs", "t", inputRequest(f.ID, raw), nil)
+			requireStatus(t, w, 201)
+			var run domain.Run
+			if err = json.Unmarshal(w.Body.Bytes(), &run); err != nil {
+				t.Fatal(err)
+			}
+			if run.Status != domain.RunStatusPreparing || run.StartedAt != nil || run.CompletedAt != nil {
+				t.Fatalf("invalid prepared run: %+v", run)
+			}
+			p := "/v1/runs/" + run.ID
+			w = inputCall(h, "POST", p+"/artifacts?name=fixture.json", "t", raw, map[string]string{"X-Artifact-SHA256": digest})
+			requireStatus(t, w, 201)
+			var a domain.ArtifactRef
+			if err = json.Unmarshal(w.Body.Bytes(), &a); err != nil {
+				t.Fatal(err)
+			}
+			w = inputCall(h, "GET", p+"/artifacts/"+a.ID, "t", nil, nil)
+			requireStatus(t, w, 200)
+			if !bytes.Equal(raw, w.Body.Bytes()) || a.SHA256 != digest || a.SizeBytes != int64(len(raw)) || a.MediaType != "application/json" {
+				t.Fatal("raw Artifact binding mismatch")
+			}
+			time.Sleep(20 * time.Millisecond)
+			pre := c.calls.Load()
+			if pre != 0 {
+				t.Fatal("pre-submit executor call")
+			}
+			body := []byte(fmt.Sprintf(`{"artifact_id":%q}`, a.ID))
+			w = inputCall(h, "POST", p+"/submit", "other", body, nil)
+			requireStatus(t, w, 404)
+			w = inputCall(h, "POST", p+"/submit", "t", body, nil)
+			requireStatus(t, w, f.Expected.Status)
+			submitStatus := w.Code
+			if submitStatus == 400 {
+				var failure struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != "invalid_request" {
+					t.Fatal("unstable error code")
+				}
+			}
+			if submitStatus == 202 {
+				deadline := time.Now().Add(2 * time.Second)
+				for time.Now().Before(deadline) {
+					w = inputCall(h, "GET", p, "t", nil, nil)
+					requireStatus(t, w, 200)
+					if err = json.Unmarshal(w.Body.Bytes(), &run); err != nil {
+						t.Fatal(err)
+					}
+					if run.Status == domain.RunStatusFailed {
+						break
+					}
+					time.Sleep(time.Millisecond)
+				}
+				if run.Status != domain.RunStatusFailed {
+					t.Fatal("counting executor not terminal")
+				}
+				w = inputCall(h, "POST", p+"/submit", "t", body, nil)
+				requireStatus(t, w, 200)
+			}
+			w = inputCall(h, "GET", p, "t", nil, nil)
+			requireStatus(t, w, 200)
+			if err = json.Unmarshal(w.Body.Bytes(), &run); err != nil {
+				t.Fatal(err)
+			}
+			w = inputCall(h, "GET", p+"/evidence", "t", nil, nil)
+			requireStatus(t, w, 200)
+			var es struct {
+				Evidence []domain.EvidenceRef `json:"evidence"`
+			}
+			if err = json.Unmarshal(w.Body.Bytes(), &es); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(20 * time.Millisecond)
+			after := c.calls.Load()
+			if submitStatus == 202 {
+				if after != 1 || len(es.Evidence) != 1 || len(run.Inputs) != 1 || run.Submission == nil {
+					t.Fatal("missing accepted binding")
+				}
+				e, i, s := es.Evidence[0], run.Inputs[0], run.Submission
+				if e.ID != s.EvidenceID || e.SourceURI != a.URI || e.SHA256 != digest || len(e.ArtifactIDs) != 1 || e.ArtifactIDs[0] != a.ID || e.Type != "input" || e.Tool != "sas-input-validator" || e.ToolVersion != "1" || e.Parameters["schema"] != domain.InputSchema || e.Metadata["time_semantics"] != "server_validation" || e.CollectedAt.IsZero() || e.Excerpt != "" {
+					t.Fatal("Evidence mismatch")
+				}
+				if i.URI != a.URI || i.SHA256 != digest || i.SizeBytes != a.SizeBytes || i.MediaType != a.MediaType || i.Type != "alert" || i.Metadata["schema"] != domain.InputSchema || s.RunID != run.ID || s.ArtifactID != a.ID || s.SHA256 != digest || s.SizeBytes != a.SizeBytes || s.Schema != domain.InputSchema {
+					t.Fatal("frozen Run mismatch")
+				}
+			} else {
+				if after != 0 || len(es.Evidence) != 0 || run.Submission != nil || run.Status != domain.RunStatusPreparing {
+					t.Fatal("invalid fixture accepted")
+				}
+			}
+			binding, _ := json.Marshal(map[string]any{"fixture": f.ID, "raw_sha256": digest, "raw_size": len(raw), "artifact": a, "run_id": run.ID, "status": run.Status, "inputs": run.Inputs, "submission": run.Submission, "evidence": es.Evidence, "calls_before_submit": pre, "calls_after_submit_and_replay": after, "submit_http_status": submitStatus})
+			t.Log(string(binding))
+		})
+	}
+}

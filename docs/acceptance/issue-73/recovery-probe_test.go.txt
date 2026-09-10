@@ -1,0 +1,45 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestIndependent73CancellationAndCrossRunReservedEvidence(t *testing.T) {
+	raw := []byte(`{"schema":"sas.synthetic-alert/v1","synthetic":true,"alert_id":"one","observations":[]}`)
+	counter := &inputCounter{}
+	env := newInputEnv(t, t.TempDir(), false, counter, nil)
+	run, art := prepareInput(t, env.h, "independent-cancel", raw)
+	submitInput(t, env.h, run, art, 202)
+	requireStatus(t, inputCall(env.h, "POST", "/v1/runs/"+run.ID+"/cancel", "t", []byte(`{}`), nil), 200)
+	submitInput(t, env.h, run, art, 200)
+	if err := env.svc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(220 * time.Millisecond)
+	t.Logf("calls_after_cancel_replay_start=%d", counter.calls.Load())
+	if counter.calls.Load() != 0 {
+		t.Fatalf("cancelled queued replay invoked executor: %d", counter.calls.Load())
+	}
+	candidate, ca := prepareInput(t, env.h, "independent-reservation", raw)
+	env.faults.stage.Store(3)
+	submitInput(t, env.h, candidate, ca, 500)
+	j, err := env.runs.GetInputJournal(context.Background(), candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := prepareInput(t, env.h, "independent-other", raw)
+	payload, _ := json.Marshal(j.Evidence)
+	crossRun := inputCall(env.h, "POST", "/v1/runs/"+other.ID+"/evidence", "t", payload, nil)
+	t.Logf("cross_run_public_append_status=%d", crossRun.Code)
+	requireStatus(t, crossRun, 409)
+	crossTenant := inputCall(env.h, "POST", "/v1/runs/"+candidate.ID+"/evidence", "other-tenant", payload, nil)
+	t.Logf("cross_tenant_public_append_status=%d", crossTenant.Code)
+	requireStatus(t, crossTenant, 404)
+	t.Logf("final_calls=%d", counter.calls.Load())
+	if counter.calls.Load() != 0 {
+		t.Fatal("public evidence caused execution")
+	}
+}
