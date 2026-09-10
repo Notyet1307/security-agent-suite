@@ -17,6 +17,7 @@ import (
 
 type Store struct {
 	mu        sync.RWMutex
+	syncDir   func(string) error
 	root      string
 	runsDir   string
 	auditPath string
@@ -29,8 +30,15 @@ func New(root string) (*Store, error) {
 	if err := os.MkdirAll(runsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
+	if err := store.SyncDirectory(root); err != nil {
+		return nil, err
+	}
+	if err := store.SyncDirectory(filepath.Dir(root)); err != nil {
+		return nil, err
+	}
 	s := &Store{
 		root:      root,
+		syncDir:   store.SyncDirectory,
 		runsDir:   runsDir,
 		auditPath: filepath.Join(root, "audit.jsonl"),
 		runs:      map[string]*domain.Run{},
@@ -69,7 +77,11 @@ func (s *Store) load() error {
 			return err
 		}
 		s.runs[run.ID] = copyRun
-		s.byRequest[requestKey(run.Scope.TenantID, run.RequestID)] = run.ID
+		key := requestKey(run.Scope.TenantID, run.RequestID)
+		if previous, ok := s.byRequest[key]; ok && previous != run.ID {
+			return fmt.Errorf("duplicate persisted request id")
+		}
+		s.byRequest[key] = run.ID
 	}
 	return nil
 }
@@ -91,11 +103,14 @@ func (s *Store) Create(ctx context.Context, run *domain.Run) error {
 	if err != nil {
 		return err
 	}
-	if err := s.persistLocked(copyRun); err != nil {
+	published, err := s.persistLocked(copyRun)
+	if published {
+		s.runs[run.ID] = copyRun
+		s.byRequest[key] = run.ID
+	}
+	if err != nil {
 		return err
 	}
-	s.runs[run.ID] = copyRun
-	s.byRequest[key] = run.ID
 	return s.appendAuditLocked(copyRun.Events[len(copyRun.Events)-1], copyRun)
 }
 
@@ -105,6 +120,9 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.Run, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.syncDir(s.runsDir); err != nil {
+		return nil, err
+	}
 	run, ok := s.runs[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -118,6 +136,9 @@ func (s *Store) FindByRequestID(ctx context.Context, tenantID, requestID string)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.syncDir(s.runsDir); err != nil {
+		return nil, err
+	}
 	id, ok := s.byRequest[requestKey(tenantID, requestID)]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -143,10 +164,13 @@ func (s *Store) Update(ctx context.Context, id string, mutate func(*domain.Run) 
 	if err := mutate(working); err != nil {
 		return nil, err
 	}
-	if err := s.persistLocked(working); err != nil {
+	published, err := s.persistLocked(working)
+	if published {
+		s.runs[id] = working
+	}
+	if err != nil {
 		return nil, err
 	}
-	s.runs[id] = working
 	for _, event := range working.Events[beforeEvents:] {
 		if err := s.appendAuditLocked(event, working); err != nil {
 			return nil, err
@@ -161,6 +185,9 @@ func (s *Store) List(ctx context.Context, filter store.ListFilter) ([]domain.Run
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.syncDir(s.runsDir); err != nil {
+		return nil, err
+	}
 	result := make([]domain.Run, 0, len(s.runs))
 	for _, run := range s.runs {
 		if filter.TenantID != "" && run.Scope.TenantID != filter.TenantID {
@@ -185,43 +212,45 @@ func (s *Store) List(ctx context.Context, filter store.ListFilter) ([]domain.Run
 	return result, nil
 }
 
-func (s *Store) persistLocked(run *domain.Run) error {
+// persistLocked reports publication even when the final sync fails: callers
+// retain the in-memory reservation, and reads must reconfirm durability.
+func (s *Store) persistLocked(run *domain.Run) (bool, error) {
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode run state: %w", err)
+		return false, fmt.Errorf("encode run state: %w", err)
 	}
 	path := filepath.Join(s.runsDir, run.ID+".json")
 	tmp, err := os.CreateTemp(s.runsDir, run.ID+"-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create state temp file: %w", err)
+		return false, fmt.Errorf("create state temp file: %w", err)
 	}
 	tmpName := tmp.Name()
 	cleanup := func() { _ = os.Remove(tmpName) }
 	defer cleanup()
 	if err := tmp.Chmod(0o640); err != nil {
 		_ = tmp.Close()
-		return err
+		return false, err
 	}
 	writer := bufio.NewWriter(tmp)
 	if _, err := writer.Write(data); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write run state: %w", err)
+		return false, fmt.Errorf("write run state: %w", err)
 	}
 	if err := writer.Flush(); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("flush run state: %w", err)
+		return false, fmt.Errorf("flush run state: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("sync run state: %w", err)
+		return false, fmt.Errorf("sync run state: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close run state: %w", err)
+		return false, fmt.Errorf("close run state: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace run state: %w", err)
+		return false, fmt.Errorf("replace run state: %w", err)
 	}
-	return nil
+	return true, s.syncDir(s.runsDir)
 }
 
 func (s *Store) appendAuditLocked(event domain.RunEvent, run *domain.Run) error {

@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{runID}/artifacts/{artifactID}", s.downloadArtifact)
 	mux.HandleFunc("POST /v1/runs/{runID}/approve", s.approveRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
+	mux.HandleFunc("POST /v1/runs/{runID}/submit", s.submitRun)
 
 	return chain(
 		mux,
@@ -136,11 +137,14 @@ func (s *Server) getAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateRunRequest
-	if err := s.decode(w, r, &req); err != nil {
+	if err := s.decodeCreate(r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
 	tenantID := tenantIDFromContext(r.Context())
+	if strings.TrimSpace(req.ExecutionMode) == "manual" {
+		req.Scope.TenantID = strings.TrimSpace(req.Scope.TenantID)
+	}
 	if req.Scope.TenantID == "" {
 		req.Scope.TenantID = tenantID
 	} else if req.Scope.TenantID != tenantID {
@@ -153,6 +157,9 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusAccepted
+	if run.Manual() {
+		status = http.StatusCreated
+	}
 	if !created {
 		status = http.StatusOK
 	}
@@ -226,7 +233,7 @@ func (s *Server) appendEvidence(w http.ResponseWriter, r *http.Request) {
 	if ref.CollectedAt.IsZero() {
 		ref.CollectedAt = time.Now().UTC()
 	}
-	stored, err := s.evidence.Append(r.Context(), tenantIDFromContext(r.Context()), run.ID, ref)
+	stored, err := s.service.AppendEvidence(r.Context(), tenantIDFromContext(r.Context()), run.ID, ref, s.evidence)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -305,6 +312,22 @@ func (s *Server) uploadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if run.Manual() {
+		r.Body = http.MaxBytesReader(w, r.Body, min(s.cfg.MaxBodyBytes, domain.MaxInputBytes))
+		ref, err := s.service.UploadInput(r.Context(), tenantIDFromContext(r.Context()), run.ID, r.URL.Query().Get("name"), r.Header.Get("Content-Type"), r.Header.Get("X-Artifact-SHA256"), r.Body)
+		if err != nil {
+			var large *http.MaxBytesError
+			if errors.As(err, &large) {
+				err = domain.ErrInputTooLarge
+			}
+			writeError(w, r, err)
+			return
+		}
+		w.Header().Set("Location", "/v1/runs/"+run.ID+"/artifacts/"+ref.ID)
+		writeJSON(w, http.StatusCreated, ref)
+		return
+	}
+
 	if r.ContentLength > s.cfg.MaxBodyBytes {
 		writeStatusError(w, r, http.StatusRequestEntityTooLarge, "artifact_too_large", "artifact exceeds the configured request body limit")
 		return
@@ -423,7 +446,7 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request, target any) erro
 
 func validStatus(status domain.RunStatus) bool {
 	switch status {
-	case domain.RunStatusQueued, domain.RunStatusValidating, domain.RunStatusWaitingApproval, domain.RunStatusRunning, domain.RunStatusSucceeded, domain.RunStatusPartial, domain.RunStatusFailed, domain.RunStatusCancelled:
+	case domain.RunStatusPreparing, domain.RunStatusQueued, domain.RunStatusValidating, domain.RunStatusWaitingApproval, domain.RunStatusRunning, domain.RunStatusSucceeded, domain.RunStatusPartial, domain.RunStatusFailed, domain.RunStatusCancelled:
 		return true
 	default:
 		return false

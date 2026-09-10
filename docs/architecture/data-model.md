@@ -14,9 +14,12 @@
 - `request_id`：调用方提供，同一租户内幂等；
 - `tenant_id`：隔离边界；
 - `agent_id`、`mode`；
-- `input_refs`、`scope`、`policy`、`output`；
+- `inputs`、`scope`、`policy`、`output`；
 - `status`、`version`、时间戳；
-- `approval`、`events`、`result`。
+- `approval`、`events`、`result`；
+- manual 专用的 `execution_mode`、`input_manifest`、`creation_fingerprint`、`submission`（Artifact/Evidence ID、字节摘要、服务端提交时间及版本化指纹）。私有 input journal 独立持久化，不是公共请求字段。
+
+manual 的 `preparing` 不是终态，不启动执行计时；只有显式提交或取消才能离开。字段及兼容规则由 [#70](https://github.com/Notyet1307/security-agent-suite/issues/70) 定义，布局与恢复见 [manual input runbook](../runbooks/manual-input.md)。
 
 ### Runtime Provenance（M1）
 

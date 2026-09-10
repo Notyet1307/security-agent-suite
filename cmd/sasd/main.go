@@ -73,7 +73,7 @@ func main() {
 		fatal(logger, "select executor", errors.New("unsupported executor"))
 	}
 
-	service := app.New(app.Config{Workers: cfg.Workers, QueueSize: cfg.QueueSize, MaxRunTimeout: cfg.RunTimeout}, runStore, agentCatalog, policy.New(), runtime, prompt.New(), metrics, logger, evidenceStore)
+	service := app.New(app.Config{Workers: cfg.Workers, QueueSize: cfg.QueueSize, MaxRunTimeout: cfg.RunTimeout, MaxInputBytes: cfg.MaxBodyBytes, InputArtifacts: artifactStore}, runStore, agentCatalog, policy.New(), runtime, prompt.New(), metrics, logger, evidenceStore)
 	if err := service.Start(); err != nil {
 		fatal(logger, "start run service", err)
 	}

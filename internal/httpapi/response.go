@@ -26,6 +26,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
 	code := "internal_error"
 	switch {
+	case errors.Is(err, domain.ErrInputTooLarge):
+		status, code = 413, "artifact_too_large"
+	case errors.Is(err, domain.ErrRequestTooLarge):
+		status, code = 413, "request_too_large"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrInvalidTransition):

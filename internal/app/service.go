@@ -21,9 +21,11 @@ import (
 )
 
 type Config struct {
-	Workers       int
-	QueueSize     int
-	MaxRunTimeout time.Duration
+	Workers        int
+	QueueSize      int
+	MaxRunTimeout  time.Duration
+	MaxInputBytes  int64
+	InputArtifacts store.InputArtifacts
 }
 
 type Service struct {
@@ -42,8 +44,12 @@ type Service struct {
 	stop  context.CancelFunc
 	wg    sync.WaitGroup
 
+	// ponytail: serialize bounded manual input operations; use per-run locks if throughput requires it.
+	inputMu   sync.Mutex
+	journals  store.InputJournalStore
 	cancelMu  sync.Mutex
 	cancels   map[string]context.CancelFunc
+	startErr  error
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
@@ -63,7 +69,8 @@ func New(cfg Config, runStore store.RunStore, agentCatalog *catalog.Catalog, pol
 	if len(evidenceStores) > 0 {
 		evidenceStore = evidenceStores[0]
 	}
-	return &Service{
+	journals, _ := runStore.(store.InputJournalStore)
+	return &Service{journals: journals,
 		cfg: cfg, store: runStore, catalog: agentCatalog, policy: policyEngine,
 		executor: runtime, evidence: evidenceStore, prompt: promptBuilder, metrics: metrics, logger: logger,
 		queue: make(chan string, cfg.QueueSize), ctx: ctx, stop: cancel,
@@ -72,21 +79,37 @@ func New(cfg Config, runStore store.RunStore, agentCatalog *catalog.Catalog, pol
 }
 
 func (s *Service) Start() error {
-	var startErr error
 	s.startOnce.Do(func() {
+		queued, err := s.store.List(s.ctx, store.ListFilter{Status: domain.RunStatusQueued})
+		if err != nil {
+			s.startErr = err
+			return
+		}
+		for i := range queued {
+			if queued[i].Manual() {
+				if err := s.checkFrozen(s.ctx, &queued[i]); err != nil {
+					s.startErr = err
+					return
+				}
+			}
+		}
 		// Start workers before recovery so a persisted backlog larger than the
 		// in-memory queue can drain while it is being re-enqueued.
 		for i := 0; i < s.cfg.Workers; i++ {
 			s.wg.Add(1)
 			go s.worker(i + 1)
 		}
-		startErr = s.recoverRuns()
-		if startErr != nil {
+		s.startErr = s.recoverRuns()
+		if s.startErr == nil {
+			s.wg.Add(1)
+			go s.dispatchInputs()
+		}
+		if s.startErr != nil {
 			s.stop()
 			s.wg.Wait()
 		}
 	})
-	return startErr
+	return s.startErr
 }
 
 func (s *Service) Close() {
@@ -116,11 +139,32 @@ func (s *Service) CreateRun(ctx context.Context, agentID string, req domain.Crea
 	if !ok {
 		return nil, false, domain.ErrNotFound
 	}
+	req.ExecutionMode = strings.TrimSpace(req.ExecutionMode)
+	if req.ExecutionMode != "" && req.ExecutionMode != "automatic" && req.ExecutionMode != "manual" {
+		return nil, false, domain.ErrInvalidRequest
+	}
+	if req.ExecutionMode != "manual" && req.InputManifest != nil {
+		return nil, false, domain.ErrInvalidRequest
+	}
+	if req.ExecutionMode == "manual" && ((strings.TrimSpace(req.Policy.NetworkAccess) != "" && strings.TrimSpace(req.Policy.NetworkAccess) != "deny") || req.Policy.ActiveValidation) {
+		return nil, false, domain.ErrForbidden
+	}
 	decision, err := s.policy.NormalizeAndEvaluate(agent, &req)
 	if err != nil {
 		return nil, false, err
 	}
+	fingerprint := ""
+	if req.ExecutionMode == "manual" {
+		if err := policy.NormalizeManual(agent, &req, s.cfg.MaxInputBytes); err != nil {
+			return nil, false, err
+		}
+		decision.InitialStatus = domain.RunStatusPreparing
+		fingerprint = policy.CreationFingerprint(agentID, req)
+	}
 	if existing, err := s.store.FindByRequestID(ctx, req.Scope.TenantID, req.RequestID); err == nil {
+		if err := compareCreation(existing, req.ExecutionMode, fingerprint); err != nil {
+			return nil, false, err
+		}
 		if existing.AgentID != agentID {
 			return nil, false, fmt.Errorf("%w: request_id is already used by another agent", domain.ErrConflict)
 		}
@@ -135,11 +179,15 @@ func (s *Service) CreateRun(ctx context.Context, agentID string, req domain.Crea
 		return nil, false, err
 	}
 	run := domain.NewRun(runID, agent.ID, agent.DisplayName, req, decision.InitialStatus, now)
+	run.CreationFingerprint = fingerprint
 	run.RecordEvent("policy.preflight_passed", decision.Reason, "policy-engine", nil, now)
 	if err := s.store.Create(ctx, run); err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) {
 			existing, findErr := s.store.FindByRequestID(ctx, req.Scope.TenantID, req.RequestID)
 			if findErr == nil {
+				if err := compareCreation(existing, req.ExecutionMode, fingerprint); err != nil {
+					return nil, false, err
+				}
 				return existing, false, nil
 			}
 		}
@@ -211,14 +259,20 @@ func (s *Service) ApproveRun(ctx context.Context, tenantID, runID string, req do
 }
 
 func (s *Service) CancelRun(ctx context.Context, tenantID, runID, actor, reason string) (*domain.Run, error) {
+	run, err := s.GetRun(ctx, tenantID, runID)
+	if err != nil {
+		return nil, err
+	}
+	// Existing automatic/active cancellation never waits for manual upload I/O.
+	if run.Manual() {
+		s.inputMu.Lock()
+		defer s.inputMu.Unlock()
+	}
 	if strings.TrimSpace(actor) == "" {
 		actor = "api"
 	}
 	if strings.TrimSpace(reason) == "" {
 		reason = "cancel requested"
-	}
-	if _, err := s.GetRun(ctx, tenantID, runID); err != nil {
-		return nil, err
 	}
 
 	// Serialize the running transition and cancellation request so a run cannot
@@ -313,6 +367,12 @@ func (s *Service) process(runID string) error {
 	}
 	if run.Status.Terminal() {
 		return nil
+	}
+	if run.Manual() {
+		if err := s.checkFrozen(ctx, run); err != nil {
+			_, failErr := s.failRun(ctx, runID, "input_integrity_failed", "frozen input integrity check failed")
+			return failErr
+		}
 	}
 	agent, ok := s.catalog.Get(run.AgentID)
 	if !ok {
@@ -471,7 +531,7 @@ func (s *Service) failRun(ctx context.Context, runID, code, message string) (*do
 
 func (s *Service) recoverRuns() error {
 	for _, status := range []domain.RunStatus{domain.RunStatusValidating, domain.RunStatusRunning} {
-		runs, err := s.store.List(context.Background(), store.ListFilter{Status: status, Limit: 10000})
+		runs, err := s.store.List(context.Background(), store.ListFilter{Status: status})
 		if err != nil {
 			return err
 		}
@@ -481,13 +541,24 @@ func (s *Service) recoverRuns() error {
 			}
 		}
 	}
-	queued, err := s.store.List(context.Background(), store.ListFilter{Status: domain.RunStatusQueued, Limit: 10000})
+	queued, err := s.store.List(context.Background(), store.ListFilter{Status: domain.RunStatusQueued})
 	if err != nil {
 		return err
 	}
 	for _, run := range queued {
-		if err := s.enqueue(context.Background(), run.ID); err != nil {
-			return err
+		select {
+		case s.queue <- run.ID:
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		}
+	}
+	return nil
+}
+
+func compareCreation(existing *domain.Run, mode, fingerprint string) error {
+	if existing.Manual() || mode == "manual" {
+		if !existing.Manual() || mode != "manual" || fingerprint == "" || existing.CreationFingerprint != fingerprint {
+			return domain.ErrConflict
 		}
 	}
 	return nil

@@ -167,6 +167,124 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+    "execution_mode": {
+      "type": "string",
+      "enum": [
+        "",
+        "automatic",
+        "manual"
+      ],
+      "default": "automatic"
+    },
+    "input_manifest": {
+      "$ref": "#/$defs/InputManifest"
     }
-  }
+  },
+  "description": "Normalized request schema. The API additionally enforces UTF-8 byte bounds, strict manual JSON, duration parsing, tenant context, and the lower configured body limit; see issue #70.",
+  "$defs": {
+    "InputManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "sha256",
+        "size_bytes",
+        "media_type"
+      ],
+      "properties": {
+        "schema": {
+          "const": "sas.synthetic-alert/v1"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "media_type": {
+          "const": "application/json"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "execution_mode"
+        ],
+        "properties": {
+          "execution_mode": {
+            "const": "manual"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "input_manifest"
+        ],
+        "properties": {
+          "mode": {
+            "const": "triage"
+          },
+          "inputs": {
+            "maxItems": 0
+          },
+          "policy": {
+            "not": {
+              "required": [
+                "approval_id"
+              ]
+            },
+            "properties": {
+              "network_access": {
+                "enum": [
+                  "",
+                  "deny"
+                ]
+              },
+              "active_validation": {
+                "const": false
+              }
+            }
+          },
+          "output": {
+            "properties": {
+              "formats": {
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "json",
+                    "html"
+                  ]
+                }
+              }
+            }
+          },
+          "metadata": {
+            "maxProperties": 128,
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "input_manifest"
+          ]
+        }
+      }
+    }
+  ]
 }

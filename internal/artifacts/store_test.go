@@ -3,7 +3,9 @@ package artifacts
 import (
 	"context"
 	"errors"
+	"github.com/Notyet1307/security-agent-suite/internal/store"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -91,5 +93,34 @@ func TestPutReaderRegistersMetadataAndValidatesHash(t *testing.T) {
 	refs, err = store.List(context.Background(), "run-upload")
 	if err != nil || len(refs) != 1 {
 		t.Fatalf("failed upload was registered: refs=%+v err=%v", refs, err)
+	}
+}
+
+func TestMetadataSyncFailureRetainsBytesAndRequiresSyncBeforeInputRead(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fail := errors.New("metadata directory sync failed")
+	s.syncDir = func(path string) error {
+		if filepath.Base(path) == metadataDirectory {
+			return fail
+		}
+		return store.SyncDirectory(path)
+	}
+	if _, err = s.Put(context.Background(), "run-one", "source.json", "application/json", []byte(`{}`), time.Now()); !errors.Is(err, fail) {
+		t.Fatalf("put: %v", err)
+	}
+	refs, err := s.List(context.Background(), "run-one")
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("uncertain metadata lost: %v %v", refs, err)
+	}
+	if _, err = s.ReadInput(context.Background(), "run-one", refs[0], 100); !errors.Is(err, fail) {
+		t.Fatalf("unsynced metadata trusted: %v", err)
+	}
+	s.syncDir = store.SyncDirectory
+	raw, err := s.ReadInput(context.Background(), "run-one", refs[0], 100)
+	if err != nil || string(raw) != `{}` {
+		t.Fatalf("original bytes lost: %q %v", raw, err)
 	}
 }

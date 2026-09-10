@@ -105,6 +105,11 @@ paths:
       description: >-
         request_id is idempotent within a tenant. Active attack-path validation
         is created in waiting_approval and is not queued until approved.
+        Opt-in execution_mode=manual is restricted to event-triage/triage with
+        network_access=deny. It creates preparing (201), never schedules before
+        explicit submit, and compares a versioned normalized creation fingerprint.
+        Automatic creation remains 202; replay is 200. Unknown or missing historical
+        manual fingerprints and automatic/manual request_id collisions are 409.
       parameters:
         - $ref: "#/components/parameters/TenantID"
         - $ref: "#/components/parameters/AgentID"
@@ -114,6 +119,13 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CreateRunRequest" }
       responses:
+        "201":
+          description: Manual Run prepared without scheduling
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
         "202":
           description: Run created
           headers:
@@ -263,6 +275,11 @@ paths:
         Streams the request body into the run-scoped artifact store, computes
         SHA-256, and returns metadata rather than embedding bytes in the Run.
         X-Artifact-SHA256 is optional; when supplied, a mismatch is rejected.
+        Manual Runs only accept uploads while preparing, require X-Artifact-SHA256
+        to match the frozen manifest, and accept application/json with optional
+        charset=utf-8. Actual bytes must match digest and size, bounded by the lower
+        of 1 MiB and the server body limit. Upload never submits. A post-publication
+        500 can leave a registered Artifact; query before retrying.
       parameters:
         - $ref: "#/components/parameters/TenantID"
         - $ref: "#/components/parameters/RunID"
@@ -332,6 +349,47 @@ paths:
               schema: { type: string }
             application/octet-stream:
               schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/submit:
+    post:
+      tags: [Runs]
+      summary: Explicitly submit one validated manual input
+      description: >-
+        Strict, case-sensitive single JSON object; rejects duplicate keys, null,
+        invalid UTF-8 and unpaired surrogates. Reads same-Run Artifact bytes and
+        validates SHA-256, size, media type and sas.synthetic-alert/v1 before
+        durable Evidence and frozen input publication. Same Artifact replay is
+        200 even after completion; another Artifact or cancelled preparation is
+        409. Other-tenant/Run resources are 404. Invalid bytes/schema are 400;
+        input too large is 413 artifact_too_large and control body too large is
+        413 request_too_large. Internal errors are 500 with uncertain persistence;
+        query/retry the same identifiers, never create a new execution to retry.
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [artifact_id]
+              properties:
+                artifact_id: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$' }
+      responses:
+        "202":
+          description: Frozen input durably accepted; queue notification is recoverable
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "200":
+          description: Same submission replay; no additional execution
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
         default: { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/approve:
     post:
@@ -453,7 +511,7 @@ components:
         default_timeout: { type: string }
     RunStatus:
       type: string
-      enum: [queued, validating, waiting_approval, running, succeeded, partial, failed, cancelled]
+      enum: [preparing, queued, validating, waiting_approval, running, succeeded, partial, failed, cancelled]
     InputRef:
       type: object
       additionalProperties: false
@@ -499,18 +557,23 @@ components:
           type: array
           items: { enum: [json, html, docx, pdf] }
     CreateRunRequest:
+      $ref: "../contracts/run-request.schema.json"
+    InputManifest:
+      $ref: "../contracts/run-request.schema.json#/$defs/InputManifest"
+    Submission:
       type: object
       additionalProperties: false
-      required: [request_id, mode, scope]
+      required: [run_id, artifact_id, schema, sha256, size_bytes, media_type, evidence_id, submitted_at, fingerprint]
       properties:
-        request_id: { type: string, minLength: 1, maxLength: 128 }
-        case_id: { type: string }
-        mode: { type: string }
-        inputs: { type: array, maxItems: 64, items: { $ref: "#/components/schemas/InputRef" } }
-        scope: { $ref: "#/components/schemas/Scope" }
-        policy: { $ref: "#/components/schemas/Policy" }
-        output: { $ref: "#/components/schemas/OutputRequest" }
-        metadata: { type: object, additionalProperties: { type: string } }
+        run_id: { type: string }
+        artifact_id: { type: string }
+        schema: { const: "sas.synthetic-alert/v1" }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        size_bytes: { type: integer, minimum: 1, maximum: 1048576 }
+        media_type: { const: application/json }
+        evidence_id: { type: string }
+        submitted_at: { type: string, format: date-time }
+        fingerprint: { type: string, pattern: '^sas\.manual-submit/v1:[a-f0-9]{64}$' }
     ApprovalRequest:
       type: object
       additionalProperties: false
@@ -661,6 +724,10 @@ components:
       type: object
       required: [id, request_id, agent_id, agent_name, mode, scope, status, created_at, updated_at, version]
       properties:
+        execution_mode: { type: string, enum: [automatic, manual] }
+        input_manifest: { $ref: "#/components/schemas/InputManifest" }
+        creation_fingerprint: { type: string, pattern: '^sas\.manual-create/v1:[a-f0-9]{64}$' }
+        submission: { $ref: "#/components/schemas/Submission" }
         id: { type: string }
         request_id: { type: string }
         case_id: { type: string }
