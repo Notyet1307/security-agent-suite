@@ -1,0 +1,43 @@
+./scripts/verify.sh
+[1/6] Go formatting
+[2/6] Static analysis
+[3/6] Tests and coverage
+ok  	github.com/Notyet1307/security-agent-suite/cmd/sasctl	1.236s	coverage: 62.5% of statements
+ok  	github.com/Notyet1307/security-agent-suite/cmd/sasd	0.562s	coverage: 5.3% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/app	2.033s	coverage: 41.7% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/artifacts	2.153s	coverage: 65.7% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/catalog	2.585s	coverage: 73.0% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/config	3.098s	coverage: 72.7% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/doctor	3.668s	coverage: 84.4% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/domain	4.127s	coverage: 80.8% of statements
+?   	github.com/Notyet1307/security-agent-suite/internal/executor	[no test files]
+ok  	github.com/Notyet1307/security-agent-suite/internal/executor/agentcompose	52.884s	coverage: 90.8% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/executor/mock	5.416s	coverage: 89.5% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	11.764s	coverage: 74.0% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/id	5.086s	coverage: 75.0% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/observability	4.811s	coverage: 88.5% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/policy	5.153s	coverage: 38.3% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/prompt	5.259s	coverage: 88.9% of statements
+	github.com/Notyet1307/security-agent-suite/internal/store		coverage: 0.0% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/store/file	5.486s	coverage: 69.1% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/store/memory	5.159s	coverage: 44.5% of statements
+ok  	github.com/Notyet1307/security-agent-suite/internal/validation	5.087s	coverage: 65.0% of statements
+[4/6] Builds
+[5/6] Contract and repository checks
+............
+----------------------------------------------------------------------
+Ran 12 tests in 0.013s
+
+OK
+verified 10 input fixtures (offline bytes/schema only; no API or executor run)
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 48.020s
+
+OK
+release manifest verified
+PyYAML not installed; YAML syntax parsing skipped (semantic checks still ran).
+validated 5 agents, 15 skills, JSON contracts and local links
+[6/6] Optional agent-compose validation
+skipped; set SAS_VERIFY_AGENT_COMPOSE=1 to enable
+verification passed

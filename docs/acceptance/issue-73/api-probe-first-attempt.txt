@@ -1,0 +1,149 @@
+=== RUN   TestAcceptance73RawBinding
+=== RUN   TestAcceptance73RawBinding/normal
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/empty-observations
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/prompt-injection
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/damaged
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/duplicate-key
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/trailing-data
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/invalid-utf8
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/nonstandard-number
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/unknown-version
+    accept73_probe_test.go:23: fixture manifest mismatch
+=== RUN   TestAcceptance73RawBinding/non-synthetic
+    accept73_probe_test.go:23: fixture manifest mismatch
+--- FAIL: TestAcceptance73RawBinding (0.14s)
+    --- FAIL: TestAcceptance73RawBinding/normal (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/empty-observations (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/prompt-injection (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/damaged (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/duplicate-key (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/trailing-data (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/invalid-utf8 (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/nonstandard-number (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/unknown-version (0.01s)
+    --- FAIL: TestAcceptance73RawBinding/non-synthetic (0.01s)
+=== RUN   TestManualPersistenceInterruptions
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=true
+--- PASS: TestManualPersistenceInterruptions (2.38s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=false (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=true (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=false (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=true (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=false (0.17s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=true (0.13s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=false (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=true (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=false (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=true (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=false (0.13s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=true (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=true (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=true (0.04s)
+=== RUN   TestManualJournalProtectsPublicEvidenceAndCancellation
+--- PASS: TestManualJournalProtectsPublicEvidenceAndCancellation (0.11s)
+=== RUN   TestManualQueueFullRepairsWithoutRestart
+--- PASS: TestManualQueueFullRepairsWithoutRestart (0.57s)
+=== RUN   TestManualRecoveryFailsClosed
+=== RUN   TestManualRecoveryFailsClosed/journal
+=== RUN   TestManualRecoveryFailsClosed/evidence
+=== RUN   TestManualRecoveryFailsClosed/bytes
+=== RUN   TestManualRecoveryFailsClosed/fingerprint
+=== RUN   TestManualRecoveryFailsClosed/inputs
+--- PASS: TestManualRecoveryFailsClosed (0.43s)
+    --- PASS: TestManualRecoveryFailsClosed/journal (0.08s)
+    --- PASS: TestManualRecoveryFailsClosed/evidence (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/bytes (0.08s)
+    --- PASS: TestManualRecoveryFailsClosed/fingerprint (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/inputs (0.09s)
+=== RUN   TestManualInterruptedExecutionIsNotRetried
+=== RUN   TestManualInterruptedExecutionIsNotRetried/validating
+=== RUN   TestManualInterruptedExecutionIsNotRetried/running
+--- PASS: TestManualInterruptedExecutionIsNotRetried (0.22s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/validating (0.11s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/running (0.11s)
+=== RUN   TestManualCandidateEvidencePreoccupationFailsClosed
+--- PASS: TestManualCandidateEvidencePreoccupationFailsClosed (0.04s)
+=== RUN   TestManualPreparationDoesNotExecute
+--- PASS: TestManualPreparationDoesNotExecute (0.04s)
+=== RUN   TestManualUploadSubmitAndReplay
+--- PASS: TestManualUploadSubmitAndReplay (0.11s)
+=== RUN   TestManualFixturesThroughPublicAPI
+=== RUN   TestManualFixturesThroughPublicAPI/normal
+=== RUN   TestManualFixturesThroughPublicAPI/empty-observations
+=== RUN   TestManualFixturesThroughPublicAPI/prompt-injection
+=== RUN   TestManualFixturesThroughPublicAPI/damaged
+=== RUN   TestManualFixturesThroughPublicAPI/duplicate-key
+=== RUN   TestManualFixturesThroughPublicAPI/trailing-data
+=== RUN   TestManualFixturesThroughPublicAPI/invalid-utf8
+=== RUN   TestManualFixturesThroughPublicAPI/nonstandard-number
+=== RUN   TestManualFixturesThroughPublicAPI/unknown-version
+=== RUN   TestManualFixturesThroughPublicAPI/non-synthetic
+--- PASS: TestManualFixturesThroughPublicAPI (0.58s)
+    --- PASS: TestManualFixturesThroughPublicAPI/normal (0.06s)
+    --- PASS: TestManualFixturesThroughPublicAPI/empty-observations (0.10s)
+    --- PASS: TestManualFixturesThroughPublicAPI/prompt-injection (0.10s)
+    --- PASS: TestManualFixturesThroughPublicAPI/damaged (0.07s)
+    --- PASS: TestManualFixturesThroughPublicAPI/duplicate-key (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/trailing-data (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/invalid-utf8 (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/nonstandard-number (0.04s)
+    --- PASS: TestManualFixturesThroughPublicAPI/unknown-version (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/non-synthetic (0.04s)
+=== RUN   TestManualRequestAndUploadBoundaries
+--- PASS: TestManualRequestAndUploadBoundaries (0.04s)
+=== RUN   TestManualFingerprintAndConcurrentCreation
+--- PASS: TestManualFingerprintAndConcurrentCreation (0.08s)
+=== RUN   TestManualConcurrentSubmitCancelAndBinding
+--- PASS: TestManualConcurrentSubmitCancelAndBinding (0.49s)
+=== RUN   TestManualByteLimitsAndStrictAlertFields
+--- PASS: TestManualByteLimitsAndStrictAlertFields (0.45s)
+=== RUN   TestManualOversizedIntegerAndAutomaticManifestAlias
+--- PASS: TestManualOversizedIntegerAndAutomaticManifestAlias (0.01s)
+=== RUN   TestHTTPRunLifecycleAndTenantIsolation
+--- PASS: TestHTTPRunLifecycleAndTenantIsolation (0.05s)
+=== RUN   TestHTTPEvidenceAppendAndTenantIsolation
+--- PASS: TestHTTPEvidenceAppendAndTenantIsolation (0.02s)
+FAIL
+FAIL	github.com/Notyet1307/security-agent-suite/internal/httpapi	6.254s
+FAIL

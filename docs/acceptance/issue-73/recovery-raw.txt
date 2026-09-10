@@ -1,0 +1,130 @@
+Independent reviewer: /root/accept73_recovery
+SHA: 342c9b6d8d6c20f872bd9c71d3b6a1d83300613a
+Spec: #70 v3 updated_at 2026-09-10T09:08:22Z
+
+$ go test ./internal/httpapi -run TestManual(PersistenceInterruptions|JournalProtectsPublicEvidenceAndCancellation|QueueFullRepairsWithoutRestart|RecoveryFailsClosed|InterruptedExecutionIsNotRetried|CandidateEvidencePreoccupationFailsClosed|ConcurrentSubmitCancelAndBinding)$|TestSlowManualUploadDoesNotBlockAutomaticCancellation -count=1 -v
+=== RUN   TestManualPersistenceInterruptions
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=true
+--- PASS: TestManualPersistenceInterruptions (2.83s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=false (0.20s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=true (0.21s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=false (0.21s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=true (0.19s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=false (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=true (0.22s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=false (0.13s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=true (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=false (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=true (0.26s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=false (0.13s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=true (0.13s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=true (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=true (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=true (0.10s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=true (0.07s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=false (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=true (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=false (0.04s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=true (0.04s)
+=== RUN   TestManualJournalProtectsPublicEvidenceAndCancellation
+--- PASS: TestManualJournalProtectsPublicEvidenceAndCancellation (0.15s)
+=== RUN   TestManualQueueFullRepairsWithoutRestart
+--- PASS: TestManualQueueFullRepairsWithoutRestart (0.68s)
+=== RUN   TestManualRecoveryFailsClosed
+=== RUN   TestManualRecoveryFailsClosed/journal
+=== RUN   TestManualRecoveryFailsClosed/evidence
+=== RUN   TestManualRecoveryFailsClosed/bytes
+=== RUN   TestManualRecoveryFailsClosed/fingerprint
+=== RUN   TestManualRecoveryFailsClosed/inputs
+--- PASS: TestManualRecoveryFailsClosed (0.58s)
+    --- PASS: TestManualRecoveryFailsClosed/journal (0.13s)
+    --- PASS: TestManualRecoveryFailsClosed/evidence (0.12s)
+    --- PASS: TestManualRecoveryFailsClosed/bytes (0.12s)
+    --- PASS: TestManualRecoveryFailsClosed/fingerprint (0.11s)
+    --- PASS: TestManualRecoveryFailsClosed/inputs (0.10s)
+=== RUN   TestManualInterruptedExecutionIsNotRetried
+=== RUN   TestManualInterruptedExecutionIsNotRetried/validating
+=== RUN   TestManualInterruptedExecutionIsNotRetried/running
+--- PASS: TestManualInterruptedExecutionIsNotRetried (0.28s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/validating (0.15s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/running (0.13s)
+=== RUN   TestManualCandidateEvidencePreoccupationFailsClosed
+--- PASS: TestManualCandidateEvidencePreoccupationFailsClosed (0.08s)
+=== RUN   TestSlowManualUploadDoesNotBlockAutomaticCancellation
+--- PASS: TestSlowManualUploadDoesNotBlockAutomaticCancellation (0.08s)
+=== RUN   TestManualConcurrentSubmitCancelAndBinding
+--- PASS: TestManualConcurrentSubmitCancelAndBinding (0.70s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	5.811s
+EXIT=0
+
+$ go test ./internal/store/file -run Test(InputJournalRetriesDirectorySync|EvidenceRetriesPublicationWithoutDuplicateLogicalID|RunCreateSyncFailureKeepsRequestReservation)$ -count=1 -v
+=== RUN   TestInputJournalRetriesDirectorySync
+--- PASS: TestInputJournalRetriesDirectorySync (0.02s)
+=== RUN   TestEvidenceRetriesPublicationWithoutDuplicateLogicalID
+--- PASS: TestEvidenceRetriesPublicationWithoutDuplicateLogicalID (0.07s)
+=== RUN   TestRunCreateSyncFailureKeepsRequestReservation
+--- PASS: TestRunCreateSyncFailureKeepsRequestReservation (0.01s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/store/file	0.757s
+EXIT=0
+
+$ go test ./internal/artifacts -run TestMetadataSyncFailureRetainsBytesAndRequiresSyncBeforeInputRead$ -count=1 -v
+=== RUN   TestMetadataSyncFailureRetainsBytesAndRequiresSyncBeforeInputRead
+--- PASS: TestMetadataSyncFailureRetainsBytesAndRequiresSyncBeforeInputRead (0.04s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/artifacts	0.480s
+EXIT=0
+
+$ go test ./cmd/sasctl -run TestManualUploadSubmitAndWaitCLI$ -count=1 -v
+=== RUN   TestManualUploadSubmitAndWaitCLI
+--- PASS: TestManualUploadSubmitAndWaitCLI (0.00s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/cmd/sasctl	0.486s
+EXIT=0
+
+$ go test -overlay=/tmp/sas73-recovery-overlay.json ./internal/httpapi -run TestIndependent73CancellationAndCrossRunReservedEvidence$ -count=1 -v
+=== RUN   TestIndependent73CancellationAndCrossRunReservedEvidence
+--- PASS: TestIndependent73CancellationAndCrossRunReservedEvidence (0.62s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	6.226s
+EXIT=0
+
+Independent probe rerun with actual value logging
+$ go test -overlay=/tmp/sas73-recovery-overlay.json ./internal/httpapi -run TestIndependent73CancellationAndCrossRunReservedEvidence$ -count=1 -v
+=== RUN   TestIndependent73CancellationAndCrossRunReservedEvidence
+    sas73_independent_recovery_test.go:22: calls_after_cancel_replay_start=0
+    sas73_independent_recovery_test.go:36: cross_run_public_append_status=409
+    sas73_independent_recovery_test.go:39: cross_tenant_public_append_status=404
+    sas73_independent_recovery_test.go:41: final_calls=0
+--- PASS: TestIndependent73CancellationAndCrossRunReservedEvidence (0.40s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	1.095s
+EXIT=0

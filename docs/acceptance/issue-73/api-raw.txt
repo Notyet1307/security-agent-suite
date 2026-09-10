@@ -1,0 +1,148 @@
+=== RUN   TestAcceptance73RawBinding
+=== RUN   TestAcceptance73RawBinding/normal
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032686481_ee13a68c1a1c186f","name":"fixture.json","uri":"artifact://runs/run_1789032686469_73de48686333b8af/art_1789032686481_ee13a68c1a1c186f","media_type":"application/json","sha256":"993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a","size_bytes":205,"created_at":"2026-09-10T09:31:26.481028Z"},"calls_after_submit_and_replay":1,"calls_before_submit":0,"evidence":[{"id":"input_1789032686524_b33c0505a4c8ff20","type":"input","source_uri":"artifact://runs/run_1789032686469_73de48686333b8af/art_1789032686481_ee13a68c1a1c186f","sha256":"993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a","tool":"sas-input-validator","tool_version":"1","parameters":{"schema":"sas.synthetic-alert/v1"},"artifact_ids":["art_1789032686481_ee13a68c1a1c186f"],"collected_at":"2026-09-10T09:31:26.524507Z","metadata":{"time_semantics":"server_validation"}}],"fixture":"normal","inputs":[{"type":"alert","uri":"artifact://runs/run_1789032686469_73de48686333b8af/art_1789032686481_ee13a68c1a1c186f","sha256":"993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a","media_type":"application/json","size_bytes":205,"metadata":{"schema":"sas.synthetic-alert/v1"}}],"raw_sha256":"993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a","raw_size":205,"run_id":"run_1789032686469_73de48686333b8af","status":"failed","submission":{"run_id":"run_1789032686469_73de48686333b8af","artifact_id":"art_1789032686481_ee13a68c1a1c186f","schema":"sas.synthetic-alert/v1","sha256":"993c02421ceee24561871b15467481f7bc94af277bd487190e5df0fa64096f8a","size_bytes":205,"media_type":"application/json","evidence_id":"input_1789032686524_b33c0505a4c8ff20","submitted_at":"2026-09-10T09:31:26.524507Z","fingerprint":"sas.manual-submit/v1:2e2b012391c7849cec96ecf3ce902d7dc857653970cbe87dce87f38683acb413"},"submit_http_status":202}
+=== RUN   TestAcceptance73RawBinding/empty-observations
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032686645_d6f7bc7809dd0278","name":"fixture.json","uri":"artifact://runs/run_1789032686633_3dc1e86506e94247/art_1789032686645_d6f7bc7809dd0278","media_type":"application/json","sha256":"f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e","size_bytes":104,"created_at":"2026-09-10T09:31:26.645116Z"},"calls_after_submit_and_replay":1,"calls_before_submit":0,"evidence":[{"id":"input_1789032686678_67d5c8c4b6315f79","type":"input","source_uri":"artifact://runs/run_1789032686633_3dc1e86506e94247/art_1789032686645_d6f7bc7809dd0278","sha256":"f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e","tool":"sas-input-validator","tool_version":"1","parameters":{"schema":"sas.synthetic-alert/v1"},"artifact_ids":["art_1789032686645_d6f7bc7809dd0278"],"collected_at":"2026-09-10T09:31:26.6787Z","metadata":{"time_semantics":"server_validation"}}],"fixture":"empty-observations","inputs":[{"type":"alert","uri":"artifact://runs/run_1789032686633_3dc1e86506e94247/art_1789032686645_d6f7bc7809dd0278","sha256":"f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e","media_type":"application/json","size_bytes":104,"metadata":{"schema":"sas.synthetic-alert/v1"}}],"raw_sha256":"f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e","raw_size":104,"run_id":"run_1789032686633_3dc1e86506e94247","status":"failed","submission":{"run_id":"run_1789032686633_3dc1e86506e94247","artifact_id":"art_1789032686645_d6f7bc7809dd0278","schema":"sas.synthetic-alert/v1","sha256":"f158358f2499b73ed70225aa41bc2ff7c6fc05ff60cdc795f9877ccd8974786e","size_bytes":104,"media_type":"application/json","evidence_id":"input_1789032686678_67d5c8c4b6315f79","submitted_at":"2026-09-10T09:31:26.6787Z","fingerprint":"sas.manual-submit/v1:075da89e287270103d10bd11424396f484574e871500ef381c1ad86a6e5ea254"},"submit_http_status":202}
+=== RUN   TestAcceptance73RawBinding/prompt-injection
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032686797_44d2f0fe2a0777ad","name":"fixture.json","uri":"artifact://runs/run_1789032686785_48008be3ec53d0a9/art_1789032686797_44d2f0fe2a0777ad","media_type":"application/json","sha256":"fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245","size_bytes":261,"created_at":"2026-09-10T09:31:26.797177Z"},"calls_after_submit_and_replay":1,"calls_before_submit":0,"evidence":[{"id":"input_1789032686834_2b19a39dcd51f054","type":"input","source_uri":"artifact://runs/run_1789032686785_48008be3ec53d0a9/art_1789032686797_44d2f0fe2a0777ad","sha256":"fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245","tool":"sas-input-validator","tool_version":"1","parameters":{"schema":"sas.synthetic-alert/v1"},"artifact_ids":["art_1789032686797_44d2f0fe2a0777ad"],"collected_at":"2026-09-10T09:31:26.834143Z","metadata":{"time_semantics":"server_validation"}}],"fixture":"prompt-injection","inputs":[{"type":"alert","uri":"artifact://runs/run_1789032686785_48008be3ec53d0a9/art_1789032686797_44d2f0fe2a0777ad","sha256":"fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245","media_type":"application/json","size_bytes":261,"metadata":{"schema":"sas.synthetic-alert/v1"}}],"raw_sha256":"fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245","raw_size":261,"run_id":"run_1789032686785_48008be3ec53d0a9","status":"failed","submission":{"run_id":"run_1789032686785_48008be3ec53d0a9","artifact_id":"art_1789032686797_44d2f0fe2a0777ad","schema":"sas.synthetic-alert/v1","sha256":"fa18288d918819eb784a915a5e2ef926138bfe221edf7f56d8a30ef380e74245","size_bytes":261,"media_type":"application/json","evidence_id":"input_1789032686834_2b19a39dcd51f054","submitted_at":"2026-09-10T09:31:26.834143Z","fingerprint":"sas.manual-submit/v1:d65451bc7c35dc34d7983cfd35c5d815a52bbd237f52ee0d5c8c79519aa1c57b"},"submit_http_status":202}
+=== RUN   TestAcceptance73RawBinding/damaged
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032686971_5c442e4602c5e730","name":"fixture.json","uri":"artifact://runs/run_1789032686959_8c9bcf31f91a5cfb/art_1789032686971_5c442e4602c5e730","media_type":"application/json","sha256":"1f56b30b7a5370cf5950a2684776bff4ef5f9e11cc38d9979733b7ed05df946b","size_bytes":202,"created_at":"2026-09-10T09:31:26.971499Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"damaged","inputs":null,"raw_sha256":"1f56b30b7a5370cf5950a2684776bff4ef5f9e11cc38d9979733b7ed05df946b","raw_size":202,"run_id":"run_1789032686959_8c9bcf31f91a5cfb","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/duplicate-key
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687058_fda84d5be2a66ddd","name":"fixture.json","uri":"artifact://runs/run_1789032687047_6cd357ba3df7d57b/art_1789032687058_fda84d5be2a66ddd","media_type":"application/json","sha256":"ff6652284392ebe34eca5461d38d1318e44a5e0ecf84e122e810c2f9aadb426f","size_bytes":222,"created_at":"2026-09-10T09:31:27.058054Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"duplicate-key","inputs":null,"raw_sha256":"ff6652284392ebe34eca5461d38d1318e44a5e0ecf84e122e810c2f9aadb426f","raw_size":222,"run_id":"run_1789032687047_6cd357ba3df7d57b","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/trailing-data
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687152_bdceae770825bc66","name":"fixture.json","uri":"artifact://runs/run_1789032687139_b342610d30b3de91/art_1789032687152_bdceae770825bc66","media_type":"application/json","sha256":"d1c28694fc4a2643c0bab3a5b0b9a29692a2977e1fd80834d10f91e2553be25f","size_bytes":208,"created_at":"2026-09-10T09:31:27.152227Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"trailing-data","inputs":null,"raw_sha256":"d1c28694fc4a2643c0bab3a5b0b9a29692a2977e1fd80834d10f91e2553be25f","raw_size":208,"run_id":"run_1789032687139_b342610d30b3de91","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/invalid-utf8
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687242_d28fd9aaffd37c12","name":"fixture.json","uri":"artifact://runs/run_1789032687229_170af14a760c9db3/art_1789032687242_d28fd9aaffd37c12","media_type":"application/json","sha256":"6706b9a126bbb214c77de9e1698b6d58949d3c00bfc4d2fa8312b97a8e6ebaeb","size_bytes":202,"created_at":"2026-09-10T09:31:27.2423Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"invalid-utf8","inputs":null,"raw_sha256":"6706b9a126bbb214c77de9e1698b6d58949d3c00bfc4d2fa8312b97a8e6ebaeb","raw_size":202,"run_id":"run_1789032687229_170af14a760c9db3","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/nonstandard-number
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687329_b50d225325e6c035","name":"fixture.json","uri":"artifact://runs/run_1789032687316_b20528304cf58e33/art_1789032687329_b50d225325e6c035","media_type":"application/json","sha256":"33fbbc352b83c857ed5deba972745298ee57f8d8cbc94aa23cf46ceed86a86b2","size_bytes":204,"created_at":"2026-09-10T09:31:27.329245Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"nonstandard-number","inputs":null,"raw_sha256":"33fbbc352b83c857ed5deba972745298ee57f8d8cbc94aa23cf46ceed86a86b2","raw_size":204,"run_id":"run_1789032687316_b20528304cf58e33","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/unknown-version
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687416_54a2f96ed2f7c251","name":"fixture.json","uri":"artifact://runs/run_1789032687403_2575add226e63e74/art_1789032687416_54a2f96ed2f7c251","media_type":"application/json","sha256":"e2e8e20d19eeeabda256a8e02fd8f1853b7281832a64ef9101904a122acb0281","size_bytes":205,"created_at":"2026-09-10T09:31:27.416218Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"unknown-version","inputs":null,"raw_sha256":"e2e8e20d19eeeabda256a8e02fd8f1853b7281832a64ef9101904a122acb0281","raw_size":205,"run_id":"run_1789032687403_2575add226e63e74","status":"preparing","submission":null,"submit_http_status":400}
+=== RUN   TestAcceptance73RawBinding/non-synthetic
+    accept73_probe_test.go:141: {"artifact":{"id":"art_1789032687507_76ddc8b75ce9c368","name":"fixture.json","uri":"artifact://runs/run_1789032687495_09c4e6d58adf7d38/art_1789032687507_76ddc8b75ce9c368","media_type":"application/json","sha256":"e219beb34bcddb16dd29d78597d36a2bb72c6d5cf61b6d2b542d40ef73dcfffd","size_bytes":206,"created_at":"2026-09-10T09:31:27.507244Z"},"calls_after_submit_and_replay":0,"calls_before_submit":0,"evidence":[],"fixture":"non-synthetic","inputs":null,"raw_sha256":"e219beb34bcddb16dd29d78597d36a2bb72c6d5cf61b6d2b542d40ef73dcfffd","raw_size":206,"run_id":"run_1789032687495_09c4e6d58adf7d38","status":"preparing","submission":null,"submit_http_status":400}
+--- PASS: TestAcceptance73RawBinding (1.14s)
+    --- PASS: TestAcceptance73RawBinding/normal (0.18s)
+    --- PASS: TestAcceptance73RawBinding/empty-observations (0.15s)
+    --- PASS: TestAcceptance73RawBinding/prompt-injection (0.17s)
+    --- PASS: TestAcceptance73RawBinding/damaged (0.09s)
+    --- PASS: TestAcceptance73RawBinding/duplicate-key (0.09s)
+    --- PASS: TestAcceptance73RawBinding/trailing-data (0.09s)
+    --- PASS: TestAcceptance73RawBinding/invalid-utf8 (0.09s)
+    --- PASS: TestAcceptance73RawBinding/nonstandard-number (0.09s)
+    --- PASS: TestAcceptance73RawBinding/unknown-version (0.09s)
+    --- PASS: TestAcceptance73RawBinding/non-synthetic (0.09s)
+=== RUN   TestManualPersistenceInterruptions
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=false/stage=6/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=1/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=2/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=3/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=4/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=5/restart=true
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=false
+=== RUN   TestManualPersistenceInterruptions/memory=true/stage=6/restart=true
+--- PASS: TestManualPersistenceInterruptions (2.57s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=false (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=1/restart=true (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=false (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=2/restart=true (0.22s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=false (0.15s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=3/restart=true (0.19s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=false (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=4/restart=true (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=false (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=5/restart=true (0.16s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=false (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=false/stage=6/restart=true (0.14s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=1/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=2/restart=true (0.05s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=3/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=4/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=false (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=5/restart=true (0.06s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=false (0.04s)
+    --- PASS: TestManualPersistenceInterruptions/memory=true/stage=6/restart=true (0.05s)
+=== RUN   TestManualJournalProtectsPublicEvidenceAndCancellation
+--- PASS: TestManualJournalProtectsPublicEvidenceAndCancellation (0.11s)
+=== RUN   TestManualQueueFullRepairsWithoutRestart
+--- PASS: TestManualQueueFullRepairsWithoutRestart (0.61s)
+=== RUN   TestManualRecoveryFailsClosed
+=== RUN   TestManualRecoveryFailsClosed/journal
+=== RUN   TestManualRecoveryFailsClosed/evidence
+=== RUN   TestManualRecoveryFailsClosed/bytes
+=== RUN   TestManualRecoveryFailsClosed/fingerprint
+=== RUN   TestManualRecoveryFailsClosed/inputs
+--- PASS: TestManualRecoveryFailsClosed (0.46s)
+    --- PASS: TestManualRecoveryFailsClosed/journal (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/evidence (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/bytes (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/fingerprint (0.09s)
+    --- PASS: TestManualRecoveryFailsClosed/inputs (0.10s)
+=== RUN   TestManualInterruptedExecutionIsNotRetried
+=== RUN   TestManualInterruptedExecutionIsNotRetried/validating
+=== RUN   TestManualInterruptedExecutionIsNotRetried/running
+--- PASS: TestManualInterruptedExecutionIsNotRetried (0.22s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/validating (0.11s)
+    --- PASS: TestManualInterruptedExecutionIsNotRetried/running (0.11s)
+=== RUN   TestManualCandidateEvidencePreoccupationFailsClosed
+--- PASS: TestManualCandidateEvidencePreoccupationFailsClosed (0.05s)
+=== RUN   TestManualPreparationDoesNotExecute
+--- PASS: TestManualPreparationDoesNotExecute (0.05s)
+=== RUN   TestManualUploadSubmitAndReplay
+--- PASS: TestManualUploadSubmitAndReplay (0.14s)
+=== RUN   TestManualFixturesThroughPublicAPI
+=== RUN   TestManualFixturesThroughPublicAPI/normal
+=== RUN   TestManualFixturesThroughPublicAPI/empty-observations
+=== RUN   TestManualFixturesThroughPublicAPI/prompt-injection
+=== RUN   TestManualFixturesThroughPublicAPI/damaged
+=== RUN   TestManualFixturesThroughPublicAPI/duplicate-key
+=== RUN   TestManualFixturesThroughPublicAPI/trailing-data
+=== RUN   TestManualFixturesThroughPublicAPI/invalid-utf8
+=== RUN   TestManualFixturesThroughPublicAPI/nonstandard-number
+=== RUN   TestManualFixturesThroughPublicAPI/unknown-version
+=== RUN   TestManualFixturesThroughPublicAPI/non-synthetic
+--- PASS: TestManualFixturesThroughPublicAPI (0.54s)
+    --- PASS: TestManualFixturesThroughPublicAPI/normal (0.08s)
+    --- PASS: TestManualFixturesThroughPublicAPI/empty-observations (0.10s)
+    --- PASS: TestManualFixturesThroughPublicAPI/prompt-injection (0.10s)
+    --- PASS: TestManualFixturesThroughPublicAPI/damaged (0.06s)
+    --- PASS: TestManualFixturesThroughPublicAPI/duplicate-key (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/trailing-data (0.04s)
+    --- PASS: TestManualFixturesThroughPublicAPI/invalid-utf8 (0.02s)
+    --- PASS: TestManualFixturesThroughPublicAPI/nonstandard-number (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/unknown-version (0.03s)
+    --- PASS: TestManualFixturesThroughPublicAPI/non-synthetic (0.03s)
+=== RUN   TestManualRequestAndUploadBoundaries
+--- PASS: TestManualRequestAndUploadBoundaries (0.04s)
+=== RUN   TestManualFingerprintAndConcurrentCreation
+--- PASS: TestManualFingerprintAndConcurrentCreation (0.07s)
+=== RUN   TestManualConcurrentSubmitCancelAndBinding
+--- PASS: TestManualConcurrentSubmitCancelAndBinding (0.50s)
+=== RUN   TestManualByteLimitsAndStrictAlertFields
+--- PASS: TestManualByteLimitsAndStrictAlertFields (0.45s)
+=== RUN   TestManualOversizedIntegerAndAutomaticManifestAlias
+--- PASS: TestManualOversizedIntegerAndAutomaticManifestAlias (0.01s)
+=== RUN   TestHTTPRunLifecycleAndTenantIsolation
+--- PASS: TestHTTPRunLifecycleAndTenantIsolation (0.07s)
+=== RUN   TestHTTPEvidenceAppendAndTenantIsolation
+--- PASS: TestHTTPEvidenceAppendAndTenantIsolation (0.02s)
+PASS
+ok  	github.com/Notyet1307/security-agent-suite/internal/httpapi	7.789s
