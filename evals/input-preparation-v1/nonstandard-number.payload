@@ -1,0 +1,1 @@
+{"schema":"sas.synthetic-alert/v1","synthetic":NaN,"alert_id":"synthetic-login-001","observations":[{"source":"synthetic-login-log","text":"2026-09-10T00:00:00Z user=demo src=192.0.2.10 login=failure"}]}
