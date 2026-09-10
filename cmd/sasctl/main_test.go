@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -245,5 +249,62 @@ func TestRunCommandExitCodes(t *testing.T) {
 				t.Fatal("expected command diagnostic on stderr")
 			}
 		})
+	}
+}
+
+func TestManualUploadSubmitAndWaitCLI(t *testing.T) {
+	raw := []byte("{\"synthetic\":true}\n")
+	path := filepath.Join(t.TempDir(), "alert.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("X-Tenant-ID") != "t" || r.Header.Get("X-API-Key") != "key" {
+			t.Error("missing authentication")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/runs/run-one/artifacts":
+			body, _ := io.ReadAll(r.Body)
+			if !bytes.Equal(body, raw) || r.Header.Get("X-Artifact-SHA256") != strings.Repeat("a", 64) || r.URL.Query().Get("name") != "alert.json" {
+				t.Error("changed upload bytes or headers")
+			}
+			w.WriteHeader(201)
+			fmt.Fprint(w, `{"id":"art-one"}`)
+		case "/v1/runs/run-one/submit":
+			body, _ := io.ReadAll(r.Body)
+			if string(body) != `{"artifact_id":"art-one"}` {
+				t.Errorf("submit body %s", body)
+			}
+			w.WriteHeader(202)
+			fmt.Fprint(w, `{"status":"queued"}`)
+		case "/v1/runs/run-one":
+			fmt.Fprint(w, `{"status":"preparing"}`)
+		case "/v1/runs/unknown":
+			fmt.Fprint(w, `{"status":"future-state"}`)
+		default:
+			t.Error("unexpected request", r.URL.Path)
+			w.WriteHeader(500)
+		}
+	}))
+	defer server.Close()
+	for _, args := range [][]string{{"upload", "run-one", "--file", path, "--sha256", strings.Repeat("a", 64)}, {"submit", "run-one", "--artifact-id", "art-one"}, {"wait", "run-one"}} {
+		var out, errout bytes.Buffer
+		code := run(append([]string{"--base-url", server.URL, "--tenant", "t", "--api-key", "key"}, args...), &out, &errout, nil)
+		if code != 0 {
+			t.Fatalf("%v failed: %s", args, errout.String())
+		}
+		if args[0] == "wait" && !strings.Contains(errout.String(), "submit") {
+			t.Fatal("missing preparation hint")
+		}
+	}
+	var out, errout bytes.Buffer
+	if code := run([]string{"--base-url", server.URL, "--tenant", "t", "--api-key", "key", "wait", "unknown"}, &out, &errout, nil); code == 0 {
+		t.Fatal("unknown status accepted")
+	}
+	if calls != 4 {
+		t.Fatalf("automatic extra calls %d", calls)
 	}
 }

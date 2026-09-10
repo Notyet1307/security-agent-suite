@@ -1,7 +1,9 @@
 package file
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Notyet1307/security-agent-suite/internal/domain"
-	"github.com/Notyet1307/security-agent-suite/internal/id"
 	"github.com/Notyet1307/security-agent-suite/internal/store"
 )
 
@@ -21,6 +21,7 @@ const maxEvidenceFileBytes = 8 << 20
 
 type EvidenceStore struct {
 	mu        sync.RWMutex
+	syncDir   func(string) error
 	dir       string
 	runs      store.RunReader
 	artifacts store.ArtifactReader
@@ -41,7 +42,10 @@ func NewEvidenceStore(root string, runs store.RunReader, artifacts store.Artifac
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create evidence directory: %w", err)
 	}
-	s := &EvidenceStore{dir: dir, runs: runs, artifacts: artifacts, records: map[string]evidenceRecord{}}
+	if err := store.SyncDirectory(root); err != nil {
+		return nil, err
+	}
+	s := &EvidenceStore{syncDir: store.SyncDirectory, dir: dir, runs: runs, artifacts: artifacts, records: map[string]evidenceRecord{}}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
@@ -72,6 +76,9 @@ func (s *EvidenceStore) load() error {
 		}
 		tenantID := run.Scope.TenantID
 		runDir := filepath.Join(s.dir, runEntry.Name())
+		if err := s.syncDir(runDir); err != nil {
+			return err
+		}
 		entries, err := os.ReadDir(runDir)
 		if err != nil {
 			return fmt.Errorf("read evidence run directory %s: %w", runEntry.Name(), err)
@@ -141,15 +148,15 @@ func (s *EvidenceStore) Append(ctx context.Context, tenantID, runID string, evid
 	if _, exists := s.records[normalized.ID]; exists {
 		return domain.EvidenceRef{}, domain.ErrAlreadyExists
 	}
-	storageID, err := id.New("evidence", time.Now())
-	if err != nil {
-		return domain.EvidenceRef{}, err
-	}
+	storageID := fmt.Sprintf("evidence_%x", sha256.Sum256([]byte(normalized.ID)))
 	runDir := filepath.Join(s.dir, runID)
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
 		return domain.EvidenceRef{}, fmt.Errorf("create evidence run directory: %w", err)
 	}
-	if err := writeImmutable(runDir, storageID, normalized); err != nil {
+	if err := s.syncDir(s.dir); err != nil {
+		return domain.EvidenceRef{}, err
+	}
+	if err := s.writeImmutable(runDir, storageID, normalized); err != nil {
 		return domain.EvidenceRef{}, err
 	}
 	s.records[normalized.ID] = evidenceRecord{tenantID: tenantID, runID: runID, evidence: normalized}
@@ -211,7 +218,7 @@ func (s *EvidenceStore) List(ctx context.Context, tenantID, runID string) ([]dom
 	return result, nil
 }
 
-func writeImmutable(runDir, storageID string, evidence domain.EvidenceRef) error {
+func (s *EvidenceStore) writeImmutable(runDir, storageID string, evidence domain.EvidenceRef) error {
 	if !store.ValidIdentifier(storageID) {
 		return fmt.Errorf("%w: invalid evidence storage id", domain.ErrInvalidRequest)
 	}
@@ -250,11 +257,18 @@ func writeImmutable(runDir, storageID string, evidence domain.EvidenceRef) error
 	path := filepath.Join(runDir, storageID+".json")
 	if err := os.Link(tmpName, path); err != nil {
 		if os.IsExist(err) {
-			return domain.ErrAlreadyExists
+			existing, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			if !bytes.Equal(existing, append(data, '\n')) {
+				return domain.ErrAlreadyExists
+			}
+			return s.syncDir(runDir)
 		}
 		return fmt.Errorf("publish evidence: %w", err)
 	}
-	return nil
+	return s.syncDir(runDir)
 }
 
 var _ store.EvidenceStore = (*EvidenceStore)(nil)

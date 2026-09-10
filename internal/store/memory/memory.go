@@ -14,10 +14,11 @@ type Store struct {
 	mu        sync.RWMutex
 	runs      map[string]*domain.Run
 	byRequest map[string]string
+	journals  map[string][]byte
 }
 
 func New() *Store {
-	return &Store{runs: map[string]*domain.Run{}, byRequest: map[string]string{}}
+	return &Store{journals: map[string][]byte{}, runs: map[string]*domain.Run{}, byRequest: map[string]string{}}
 }
 
 func requestKey(tenantID, requestID string) string { return tenantID + "\x00" + requestID }

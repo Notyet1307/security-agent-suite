@@ -28,6 +28,7 @@ func BoundedText(value string, limit int) string {
 type RunStatus string
 
 const (
+	RunStatusPreparing       RunStatus = "preparing"
 	RunStatusQueued          RunStatus = "queued"
 	RunStatusValidating      RunStatus = "validating"
 	RunStatusWaitingApproval RunStatus = "waiting_approval"
@@ -41,6 +42,7 @@ const (
 var ErrInvalidTransition = errors.New("invalid run status transition")
 
 var allowedTransitions = map[RunStatus]map[RunStatus]struct{}{
+	RunStatusPreparing: {RunStatusQueued: {}, RunStatusCancelled: {}},
 	RunStatusQueued: {
 		RunStatusValidating: {},
 		RunStatusCancelled:  {},
@@ -111,14 +113,16 @@ type OutputRequest struct {
 }
 
 type CreateRunRequest struct {
-	RequestID string            `json:"request_id"`
-	CaseID    string            `json:"case_id,omitempty"`
-	Mode      string            `json:"mode"`
-	Inputs    []InputRef        `json:"inputs,omitempty"`
-	Scope     Scope             `json:"scope"`
-	Policy    PolicyRequest     `json:"policy,omitempty"`
-	Output    OutputRequest     `json:"output,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ExecutionMode string            `json:"execution_mode,omitempty"`
+	InputManifest *InputManifest    `json:"input_manifest,omitempty"`
+	RequestID     string            `json:"request_id"`
+	CaseID        string            `json:"case_id,omitempty"`
+	Mode          string            `json:"mode"`
+	Inputs        []InputRef        `json:"inputs,omitempty"`
+	Scope         Scope             `json:"scope"`
+	Policy        PolicyRequest     `json:"policy,omitempty"`
+	Output        OutputRequest     `json:"output,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 type Approval struct {
@@ -228,31 +232,36 @@ type RunEvent struct {
 }
 
 type Run struct {
-	ID          string            `json:"id"`
-	RequestID   string            `json:"request_id"`
-	CaseID      string            `json:"case_id,omitempty"`
-	AgentID     string            `json:"agent_id"`
-	AgentName   string            `json:"agent_name"`
-	Mode        string            `json:"mode"`
-	Inputs      []InputRef        `json:"inputs,omitempty"`
-	Scope       Scope             `json:"scope"`
-	Policy      PolicyRequest     `json:"policy,omitempty"`
-	Output      OutputRequest     `json:"output,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	Status      RunStatus         `json:"status"`
-	Approval    *Approval         `json:"approval,omitempty"`
-	Result      *RunResult        `json:"result,omitempty"`
-	Events      []RunEvent        `json:"events,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-	StartedAt   *time.Time        `json:"started_at,omitempty"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty"`
-	Version     int64             `json:"version"`
+	ExecutionMode       string            `json:"execution_mode,omitempty"`
+	InputManifest       *InputManifest    `json:"input_manifest,omitempty"`
+	CreationFingerprint string            `json:"creation_fingerprint,omitempty"`
+	Submission          *Submission       `json:"submission,omitempty"`
+	ID                  string            `json:"id"`
+	RequestID           string            `json:"request_id"`
+	CaseID              string            `json:"case_id,omitempty"`
+	AgentID             string            `json:"agent_id"`
+	AgentName           string            `json:"agent_name"`
+	Mode                string            `json:"mode"`
+	Inputs              []InputRef        `json:"inputs,omitempty"`
+	Scope               Scope             `json:"scope"`
+	Policy              PolicyRequest     `json:"policy,omitempty"`
+	Output              OutputRequest     `json:"output,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	Status              RunStatus         `json:"status"`
+	Approval            *Approval         `json:"approval,omitempty"`
+	Result              *RunResult        `json:"result,omitempty"`
+	Events              []RunEvent        `json:"events,omitempty"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	StartedAt           *time.Time        `json:"started_at,omitempty"`
+	CompletedAt         *time.Time        `json:"completed_at,omitempty"`
+	Version             int64             `json:"version"`
 }
 
 func NewRun(id, agentID, agentName string, req CreateRunRequest, initial RunStatus, now time.Time) *Run {
 	r := &Run{
-		ID:        id,
+		ID:            id,
+		ExecutionMode: req.ExecutionMode, InputManifest: req.InputManifest,
 		RequestID: req.RequestID,
 		CaseID:    req.CaseID,
 		AgentID:   agentID,

@@ -258,3 +258,7 @@ M0 工程基线与公开仓库
 ## 免责声明
 
 本项目仅用于获得明确授权的防御、安全运营、合规与验证场景。不得用于扫描、利用、干扰或访问未授权系统。Mock 输出仅用于工程联调，不代表真实安全判断。
+
+### 显式准备与提交输入
+
+单项 event-triage 可用 `execution_mode: manual` 创建不执行的 `preparing` Run，再上传原始合成 JSON 并显式提交。使用方法、恢复和回滚边界见 [manual input runbook](docs/runbooks/manual-input.md)；这不证明真实模型已消费输入。

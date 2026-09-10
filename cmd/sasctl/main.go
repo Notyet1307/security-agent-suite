@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Notyet1307/security-agent-suite/internal/doctor"
+	"github.com/Notyet1307/security-agent-suite/internal/store"
 	"github.com/Notyet1307/security-agent-suite/internal/validation"
 )
 
@@ -69,6 +72,10 @@ func run(args []string, stdout, stderr io.Writer, doctorRun doctorRunner) int {
 		err = c.listRuns(args[1:])
 	case "run":
 		err = c.createRun(args[1:])
+	case "upload":
+		err = c.upload(args[1:])
+	case "submit":
+		err = c.submit(args[1:])
 	case "validate-output":
 		err = c.validateOutput(args[1:])
 	case "get":
@@ -106,6 +113,8 @@ func writeUsage(w io.Writer) {
   sasctl [global flags] agents
   sasctl [global flags] list [--agent ID] [--status STATUS] [--limit N]
   sasctl [global flags] run --agent ID --file request.json
+  sasctl [global flags] upload RUN_ID --file PATH --sha256 DIGEST
+  sasctl [global flags] submit RUN_ID --artifact-id ID
   sasctl [global flags] validate-output --agent ID --file output.json
   sasctl [global flags] get RUN_ID
   sasctl [global flags] events RUN_ID
@@ -273,8 +282,14 @@ func (c *client) wait(args []string) error {
 			return err
 		}
 		switch run.Status {
+		case "preparing":
+			fmt.Fprintln(c.stderr, "input is preparing; upload bytes and explicitly submit the Artifact before waiting")
+			return printJSONTo(c.stdout, data)
+		case "queued", "validating", "running":
 		case "succeeded", "partial", "failed", "cancelled", "waiting_approval":
 			return printJSONTo(c.stdout, data)
+		default:
+			return fmt.Errorf("unsupported run status %q", run.Status)
 		}
 		if time.Now().After(deadline) {
 			return errors.New("wait timeout exceeded")
@@ -302,6 +317,10 @@ func (c *client) do(method, path string, body []byte) ([]byte, int, error) {
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
+	return c.doReader(method, path, reader, "")
+}
+
+func (c *client) doReader(method, path string, reader io.Reader, digest string) ([]byte, int, error) {
 	req, err := http.NewRequest(method, c.baseURL+path, reader)
 	if err != nil {
 		return nil, 0, err
@@ -311,7 +330,10 @@ func (c *client) do(method, path string, body []byte) ([]byte, int, error) {
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
-	if body != nil {
+	if digest != "" {
+		req.Header.Set("X-Artifact-SHA256", digest)
+	}
+	if reader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)
@@ -341,4 +363,57 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func (c *client) upload(args []string) error {
+	if len(args) == 0 || !store.ValidIdentifier(args[0]) {
+		return errors.New("valid run id is required")
+	}
+	flags := c.newFlagSet("upload")
+	path := flags.String("file", "", "raw input file")
+	digest := flags.String("sha256", "", "manifest SHA-256")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *path == "" || *digest == "" || flags.NArg() != 0 {
+		return errors.New("usage: upload RUN_ID --file PATH --sha256 DIGEST")
+	}
+	f, err := os.Open(*path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("input must be a regular file")
+	}
+	data, status, err := c.doReader("POST", "/v1/runs/"+args[0]+"/artifacts?name="+url.QueryEscape(filepath.Base(*path)), f, *digest)
+	if err != nil {
+		return err
+	}
+	if err = printJSONTo(c.stdout, data); err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("HTTP %d", status)
+	}
+	return nil
+}
+func (c *client) submit(args []string) error {
+	if len(args) == 0 || !store.ValidIdentifier(args[0]) {
+		return errors.New("valid run id is required")
+	}
+	flags := c.newFlagSet("submit")
+	artifact := flags.String("artifact-id", "", "uploaded Artifact ID")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if !store.ValidIdentifier(*artifact) || flags.NArg() != 0 {
+		return errors.New("usage: submit RUN_ID --artifact-id ID")
+	}
+	body, _ := json.Marshal(map[string]string{"artifact_id": *artifact})
+	return c.print("POST", "/v1/runs/"+args[0]+"/submit", body)
 }
